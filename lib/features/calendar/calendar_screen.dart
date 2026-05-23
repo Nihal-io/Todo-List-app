@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:table_calendar/table_calendar.dart';
+import '../../models/app_settings.dart';
 import '../../models/task.dart';
 import '../../providers/selected_day_provider.dart';
+import '../../providers/settings_provider.dart';
 import '../../providers/tasks_provider.dart';
+import '../../shared/date_format.dart';
+import '../../theme/app_theme.dart';
+import 'add_item_sheet.dart';
 
 class CalendarScreen extends ConsumerStatefulWidget {
   const CalendarScreen({super.key});
@@ -27,12 +32,18 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
 
     final selectedDay = ref.watch(selectedCalendarDayProvider);
     final allTasks = ref.watch(tasksProvider);
+    final settings = ref.watch(resolvedSettingsProvider);
+    final quadrantColors = ref.watch(quadrantColorsProvider);
 
-    List<Task> multiDayFor(DateTime day) =>
-        allTasks.where((t) => t.isMultiDay && t.occursOn(day)).toList();
+    Color colorFor(Task t) => quadrantColors[t.quadrant] ?? t.color;
 
-    List<Task> singleDayFor(DateTime day) =>
-        allTasks.where((t) => !t.isMultiDay && t.occursOn(day)).toList();
+    // Multi-day non-recurring tasks (incl. events) → bars
+    List<Task> spanningFor(DateTime day) =>
+        allTasks.where((t) => t.isMultiDay && t.isActiveOn(day)).toList();
+
+    // Everything else active that day (single-day non-recurring + recurring) → dots
+    List<Task> dotsFor(DateTime day) =>
+        allTasks.where((t) => !t.isMultiDay && t.isActiveOn(day)).toList();
 
     final now = _today();
 
@@ -42,18 +53,19 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
         day: day,
         isToday: isToday,
         isSelected: isSelected,
-        spanningTasks: multiDayFor(day),
-        singleDayTasks: singleDayFor(day),
+        spanningTasks: spanningFor(day),
+        dotTasks: dotsFor(day),
         primary: primary,
+        colorFor: colorFor,
       );
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: Column(
         children: [
           Container(
-            color: Colors.white,
+            color: AppSemanticColors.tileBackground(context),
             child: TableCalendar(
               firstDay: DateTime(2020),
               lastDay: DateTime(2030),
@@ -70,7 +82,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
               availableCalendarFormats: const {
                 CalendarFormat.month: 'Month'
               },
-              startingDayOfWeek: StartingDayOfWeek.sunday,
+              startingDayOfWeek: settings.firstDayOfWeek.startingDayOfWeek,
               calendarStyle: const CalendarStyle(
                 outsideDaysVisible: false,
                 cellMargin: EdgeInsets.symmetric(vertical: 1),
@@ -78,34 +90,42 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
               ),
               rowHeight: 64,
               daysOfWeekHeight: 32,
-              headerStyle: const HeaderStyle(
+              headerStyle: HeaderStyle(
                 formatButtonVisible: false,
                 titleCentered: true,
-                leftChevronIcon: Icon(Icons.chevron_left, size: 24),
-                rightChevronIcon: Icon(Icons.chevron_right, size: 24),
-                leftChevronMargin: EdgeInsets.symmetric(horizontal: 8),
-                rightChevronMargin: EdgeInsets.symmetric(horizontal: 8),
-                headerPadding: EdgeInsets.symmetric(vertical: 12),
+                leftChevronIcon: Icon(
+                  Icons.chevron_left,
+                  size: 24,
+                  color: AppSemanticColors.textStrong(context),
+                ),
+                rightChevronIcon: Icon(
+                  Icons.chevron_right,
+                  size: 24,
+                  color: AppSemanticColors.textStrong(context),
+                ),
+                leftChevronMargin: const EdgeInsets.symmetric(horizontal: 8),
+                rightChevronMargin: const EdgeInsets.symmetric(horizontal: 8),
+                headerPadding: const EdgeInsets.symmetric(vertical: 12),
                 titleTextStyle: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF1A1A2E),
+                  color: AppSemanticColors.textStrong(context),
                   letterSpacing: -0.3,
                 ),
-                leftChevronPadding: EdgeInsets.all(8),
-                rightChevronPadding: EdgeInsets.all(8),
-                decoration: BoxDecoration(),
+                leftChevronPadding: const EdgeInsets.all(8),
+                rightChevronPadding: const EdgeInsets.all(8),
+                decoration: const BoxDecoration(),
               ),
-              daysOfWeekStyle: const DaysOfWeekStyle(
+              daysOfWeekStyle: DaysOfWeekStyle(
                 weekdayStyle: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
-                  color: Color(0xFF9090A8),
+                  color: AppSemanticColors.textFaint(context),
                 ),
                 weekendStyle: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
-                  color: Color(0xFFB0B0C8),
+                  color: AppSemanticColors.navInactive(context),
                 ),
               ),
               calendarBuilders: CalendarBuilders(
@@ -117,9 +137,19 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          _DayHeader(selectedDay: selectedDay),
+          _DayHeader(
+            selectedDay: selectedDay,
+            dateFormat: settings.dateFormat,
+          ),
           const Divider(height: 1),
-          Expanded(child: _DayPanel(selectedDay: selectedDay)),
+          Expanded(
+            child: _DayPanel(
+              selectedDay: selectedDay,
+              density: settings.density,
+              dateFormat: settings.dateFormat,
+              colorFor: colorFor,
+            ),
+          ),
         ],
       ),
     );
@@ -127,7 +157,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
 }
 
 // ---------------------------------------------------------------------------
-// Day cell — date number, stacked spanning bars, single-day dots
+// Day cell — date number, dots (single-day + recurring), spanning bars
 // ---------------------------------------------------------------------------
 
 class _DayCell extends StatelessWidget {
@@ -136,16 +166,18 @@ class _DayCell extends StatelessWidget {
     required this.isToday,
     required this.isSelected,
     required this.spanningTasks,
-    required this.singleDayTasks,
+    required this.dotTasks,
     required this.primary,
+    required this.colorFor,
   });
 
   final DateTime day;
   final bool isToday;
   final bool isSelected;
   final List<Task> spanningTasks;
-  final List<Task> singleDayTasks;
+  final List<Task> dotTasks;
   final Color primary;
+  final Color Function(Task) colorFor;
 
   @override
   Widget build(BuildContext context) {
@@ -178,35 +210,67 @@ class _DayCell extends StatelessWidget {
                       ? Colors.white
                       : isToday
                           ? primary
-                          : const Color(0xFF1A1A2E),
+                          : AppSemanticColors.textStrong(context),
                 ),
               ),
             ),
           ),
         ),
         const SizedBox(height: 2),
-        if (singleDayTasks.isNotEmpty)
+        if (dotTasks.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 2),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                for (final t in singleDayTasks.take(3))
+                for (final t in dotTasks.take(3))
                   Container(
                     width: 4,
                     height: 4,
                     margin: const EdgeInsets.symmetric(horizontal: 1),
                     decoration: BoxDecoration(
-                      color: t.color,
+                      color: colorFor(t),
                       shape: BoxShape.circle,
+                    ),
+                  ),
+                if (dotTasks.length > 3)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 2),
+                    child: Text(
+                      '+${dotTasks.length - 3}',
+                      style: TextStyle(
+                        fontSize: 7,
+                        fontWeight: FontWeight.w800,
+                        color: primary,
+                        height: 1,
+                      ),
                     ),
                   ),
               ],
             ),
           ),
-        ...spanningTasks.take(3).map(
-              (t) => _BarSegment(task: t, day: day),
+        ...spanningTasks
+            .take(2)
+            .map((t) => _BarSegment(task: t, day: day, color: colorFor(t))),
+        if (spanningTasks.length > 2)
+          Container(
+            height: 6,
+            margin: const EdgeInsets.only(top: 1),
+            decoration: BoxDecoration(
+              color: primary.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(3),
             ),
+            alignment: Alignment.center,
+            child: Text(
+              '+${spanningTasks.length - 2}',
+              style: TextStyle(
+                fontSize: 6,
+                fontWeight: FontWeight.w800,
+                color: primary,
+                height: 1,
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -214,13 +278,19 @@ class _DayCell extends StatelessWidget {
 
 // ---------------------------------------------------------------------------
 // Spanning bar segment — adjacent same-color cells visually connect.
+// Events render at lower opacity to read as ambient context.
 // ---------------------------------------------------------------------------
 
 class _BarSegment extends StatelessWidget {
-  const _BarSegment({required this.task, required this.day});
+  const _BarSegment({
+    required this.task,
+    required this.day,
+    required this.color,
+  });
 
   final Task task;
   final DateTime day;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
@@ -232,11 +302,13 @@ class _BarSegment extends StatelessWidget {
     final capLeft = isStart || isSunday;
     final capRight = isEnd || isSaturday;
 
+    final paint = task.isEvent ? color.withValues(alpha: 0.5) : color;
+
     return Container(
       height: 6,
       margin: const EdgeInsets.only(top: 1),
       decoration: BoxDecoration(
-        color: task.color,
+        color: paint,
         borderRadius: BorderRadius.horizontal(
           left: capLeft ? const Radius.circular(3) : Radius.zero,
           right: capRight ? const Radius.circular(3) : Radius.zero,
@@ -251,9 +323,13 @@ class _BarSegment extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _DayHeader extends StatelessWidget {
-  const _DayHeader({required this.selectedDay});
+  const _DayHeader({
+    required this.selectedDay,
+    required this.dateFormat,
+  });
 
   final DateTime selectedDay;
+  final DateFormatPref dateFormat;
 
   String _label() {
     final now = DateTime.now();
@@ -265,12 +341,8 @@ class _DayHeader extends StatelessWidget {
       'Monday', 'Tuesday', 'Wednesday', 'Thursday',
       'Friday', 'Saturday', 'Sunday',
     ];
-    const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-    ];
     return '${weekdays[selectedDay.weekday - 1]}, '
-        '${months[selectedDay.month - 1]} ${selectedDay.day}';
+        '${formatDate(selectedDay, dateFormat)}';
   }
 
   @override
@@ -279,10 +351,10 @@ class _DayHeader extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
       child: Text(
         _label(),
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 15,
           fontWeight: FontWeight.w600,
-          color: Color(0xFF1A1A2E),
+          color: AppSemanticColors.textStrong(context),
         ),
       ),
     );
@@ -294,9 +366,17 @@ class _DayHeader extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _DayPanel extends ConsumerWidget {
-  const _DayPanel({required this.selectedDay});
+  const _DayPanel({
+    required this.selectedDay,
+    required this.density,
+    required this.dateFormat,
+    required this.colorFor,
+  });
 
   final DateTime selectedDay;
+  final DensityPref density;
+  final DateFormatPref dateFormat;
+  final Color Function(Task) colorFor;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -323,10 +403,16 @@ class _DayPanel extends ConsumerWidget {
       );
     }
 
-    // Multi-day tasks first, then single-day; both share the same tile.
+    int rank(Task t) {
+      if (t.isEvent) return 0;
+      if (t.isMultiDay) return 1;
+      return 2;
+    }
+
     final sorted = [...tasks]
       ..sort((a, b) {
-        if (a.isMultiDay != b.isMultiDay) return a.isMultiDay ? -1 : 1;
+        final r = rank(a).compareTo(rank(b));
+        if (r != 0) return r;
         return b.priority.index.compareTo(a.priority.index);
       });
 
@@ -334,30 +420,47 @@ class _DayPanel extends ConsumerWidget {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
       itemCount: sorted.length,
       itemBuilder: (_, i) {
-        final t = sorted[i];
-        return _TaskTile(
-          task: t,
-          onToggle: () => ref.read(tasksProvider.notifier).toggle(t.id),
-        );
-      },
+          final t = sorted[i];
+          return _TaskTile(
+            task: t,
+            selectedDay: selectedDay,
+            density: density,
+            dateFormat: dateFormat,
+            accentColor: colorFor(t),
+            onToggle: () => ref
+                .read(tasksProvider.notifier)
+                .toggleForDay(t.id, selectedDay),
+            onEdit: () => showAddItemSheet(context, taskToEdit: t),
+          );
+        },
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// Task tile — works for both single-day and multi-day tasks
+// Task tile — renders task/event/recurring shapes from a single widget.
 // ---------------------------------------------------------------------------
 
 class _TaskTile extends StatelessWidget {
-  const _TaskTile({required this.task, required this.onToggle});
+  const _TaskTile({
+    required this.task,
+    required this.selectedDay,
+    required this.onToggle,
+    required this.density,
+    required this.dateFormat,
+    required this.accentColor,
+    required this.onEdit,
+  });
 
   final Task task;
+  final DateTime selectedDay;
   final VoidCallback onToggle;
+  final DensityPref density;
+  final DateFormatPref dateFormat;
+  final Color accentColor;
+  final VoidCallback onEdit;
 
-  static const _months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ];
+  static const _weekdayShort = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
   Color get _priorityColor {
     switch (task.priority) {
@@ -370,26 +473,43 @@ class _TaskTile extends StatelessWidget {
     }
   }
 
-  String? get _dateRangeLabel {
-    if (!task.isMultiDay) return null;
-    final s = task.startDate;
-    final e = task.endDate!;
-    return '${_months[s.month - 1]} ${s.day} – '
-        '${_months[e.month - 1]} ${e.day}';
+  String? _subtitle() {
+    if (task.isMultiDay) {
+      final range =
+          formatDateRange(task.startDate, task.endDate!, dateFormat);
+      if (task.isEvent && task.hasAutoCompleted) return '$range  ·  Ended';
+      return range;
+    }
+    if (task.isRecurring) {
+      final days = (task.recurrence!.weekdays.toList()..sort())
+          .map((w) => _weekdayShort[w - 1])
+          .join(' ');
+      final until = task.recurrence!.until;
+      if (until == null) return 'Repeats $days  ·  Forever';
+      return 'Repeats $days  ·  until '
+          '${formatDate(until, dateFormat)}';
+    }
+    return null;
   }
 
   @override
   Widget build(BuildContext context) {
-    final range = _dateRangeLabel;
+    final subtitle = _subtitle();
+    final isDone = task.isCompletedOn(selectedDay);
+    final m = density.paddingMultiplier;
+    final hPad = 14 * m;
+    final vPad = 12 * m;
+    final tileGap = (8 * m).round().toDouble();
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: EdgeInsets.only(bottom: tileGap),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppSemanticColors.tileBackground(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border(left: BorderSide(color: task.color, width: 4)),
+        border: Border(left: BorderSide(color: accentColor, width: 4)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: AppSemanticColors.softShadow(context),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -397,9 +517,10 @@ class _TaskTile extends StatelessWidget {
       ),
       child: InkWell(
         onTap: onToggle,
+        onLongPress: onEdit,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -409,16 +530,16 @@ class _TaskTile extends StatelessWidget {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: task.completed
-                        ? const Color(0xFF66BB6A)
-                        : const Color(0xFFD0D0E0),
+                    color: isDone
+                        ? AppSemanticColors.successGreen
+                        : AppSemanticColors.subtleBorder(context),
                     width: 2,
                   ),
-                  color: task.completed
-                      ? const Color(0xFF66BB6A)
+                  color: isDone
+                      ? AppSemanticColors.successGreen
                       : Colors.transparent,
                 ),
-                child: task.completed
+                child: isDone
                     ? const Icon(Icons.check, size: 13, color: Colors.white)
                     : null,
               ),
@@ -433,45 +554,48 @@ class _TaskTile extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
-                        color: task.completed
-                            ? const Color(0xFF9090A8)
-                            : const Color(0xFF1A1A2E),
-                        decoration: task.completed
+                        color: isDone
+                            ? AppSemanticColors.textFaint(context)
+                            : AppSemanticColors.textStrong(context),
+                        decoration: isDone
                             ? TextDecoration.lineThrough
                             : TextDecoration.none,
-                        decorationColor: const Color(0xFF9090A8),
+                        decorationColor: AppSemanticColors.textFaint(context),
                       ),
                     ),
-                    if (range != null) ...[
+                    if (subtitle != null) ...[
                       const SizedBox(height: 2),
                       Text(
-                        range,
+                        subtitle,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 12, color: Color(0xFF9090A8)),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppSemanticColors.textFaint(context),
+                        ),
                       ),
                     ],
                   ],
                 ),
               ),
               const SizedBox(width: 8),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: _priorityColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  task.priority.name.toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: _priorityColor,
-                    letterSpacing: 0.4,
+              if (!task.isEvent)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: _priorityColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    task.priority.name.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: _priorityColor,
+                      letterSpacing: 0.4,
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         ),

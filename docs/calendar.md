@@ -193,10 +193,67 @@ Today
   ▌ Read chapter 4     Study           [MED]  ✓
 ```
 
+## Task Kinds and Recurrence
+
+After the unified-model phase, the design split again — this time along a behavior axis, not a data shape axis. The motivation: multi-day items had been uniformly treated as "tasks with a span," but exams shouldn't need to be ticked off, and gym shouldn't pile up as overdue.
+
+### Two kinds: `task` and `event`
+
+```dart
+enum TaskKind { task, event }
+```
+
+- **`task`** — the regular case. Has a checkbox. Can be overdue if its deadline passes uncompleted.
+- **`event`** — bounded date range (`endDate` required). No checkbox. Never overdue. Auto-completes once `endDate` passes (derived from time, not stored).
+
+The two kinds are an orthogonal property on `Task`, not categories. Color and priority stay cosmetic.
+
+### Weekly recurrence (Samsung alarm pattern)
+
+Tasks (not events) can also recur on specific weekdays:
+
+```dart
+class WeeklyRecurrence {
+  final Set<int> weekdays; // 1=Mon ... 7=Sun
+  final DateTime? until;   // null = forever
+}
+```
+
+- "Gym" on `{Mon, Wed, Fri}` with `until: forever` — appears as a dot on each Mon/Wed/Fri
+- "Yoga" on `{Tue, Thu}` with `until: <date>` — appears until the given date, then stops
+
+Each occurrence ticks independently via `Set<DateTime> completedDates`. The day panel's checkbox for a recurring task reflects `isCompletedOn(selectedDay)` and toggling calls `toggleForDay(taskId, day)`.
+
+### Visual differentiation in the calendar
+
+| Item type | Calendar grid | Day panel |
+|-----------|---------------|-----------|
+| Single-day task | Dot (full color) | Checkbox tile, priority badge |
+| Multi-day task (non-recurring) | Bar (full color, single completion) | Checkbox tile with date range |
+| Event | Bar (50% opacity, looks ambient) | Event icon tile, no checkbox, "Ended" tag if past |
+| Recurring task occurrence | Dot per matching day | Checkbox tile with "Repeats S M T … · until …" subtitle |
+
+### Overdue / completion rules
+
+| Kind | Overdue? | Auto-complete? |
+|------|----------|----------------|
+| task (non-recurring) | yes, if past `endDate ?? startDate` and unticked | no |
+| task (recurring) | never — missed occurrences are just missed | no |
+| event | never | yes, once `endDate` is in the past |
+
+The home dashboard's overdue panel uses `task.isOverdueOn(today)`, which cleanly excludes events and recurring tasks without special-casing.
+
+### Locked design choices
+
+- **One tick** for non-recurring multi-day tasks. Per-day ticking is only for recurring tasks. This keeps the visual mental model simple: bar = sustained single effort with one finish, dot = single day with its own state.
+- **A task is recurring XOR multi-day**, never both. The add sheet hides the "Until Date" row when weekdays are selected — the "Repeats until" field replaces it.
+- **Event auto-completion is purely derived** from `endDate < now`. No persisted "completed" bool on events.
+
 ## What's Next (Not Done)
 
-- Persist tasks via Drift (currently in-memory sample data)
-- Today tab — list of tasks due today
+- Persist tasks via Drift (currently in-memory sample data; `completedDates` will likely become a side table)
+- A "completed" view that surfaces events whose end date has passed
+- Editing recurrence on an existing task
 - Matrix tab — Eisenhower matrix with tasks as nodes
 - Notifications integration
 - Cowork (deferred)

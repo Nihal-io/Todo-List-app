@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../features/calendar/add_item_sheet.dart';
+import '../../providers/home_provider.dart';
+import '../../providers/selected_day_provider.dart';
+import '../../theme/app_theme.dart';
 
 class ShellScaffold extends ConsumerWidget {
   const ShellScaffold({
@@ -11,7 +14,13 @@ class ShellScaffold extends ConsumerWidget {
 
   final StatefulNavigationShell navigationShell;
 
-  void _onTap(int index) {
+  void _onTap(int index, WidgetRef ref) {
+    final returningToHome =
+        navigationShell.currentIndex != 0 && index == 0;
+    if (returningToHome) {
+      final next = ref.read(homeRevisitSignalProvider) + 1;
+      ref.read(homeRevisitSignalProvider.notifier).state = next;
+    }
     navigationShell.goBranch(
       index,
       initialLocation: index == navigationShell.currentIndex,
@@ -26,7 +35,20 @@ class ShellScaffold extends ConsumerWidget {
     return Scaffold(
       body: navigationShell,
       floatingActionButton: FloatingActionButton(
-        onPressed: () => showAddItemSheet(context),
+        onPressed: () {
+          // When on Calendar tab, use the currently selected calendar day.
+          // From any other tab, default to today so a prior calendar selection
+          // doesn't bleed into the new task date.
+          final isOnCalendar = navigationShell.currentIndex == 2;
+          final initialDate = isOnCalendar
+              ? ref.read(selectedCalendarDayProvider)
+              : DateTime(
+                  DateTime.now().year,
+                  DateTime.now().month,
+                  DateTime.now().day,
+                );
+          showAddItemSheet(context, initialDate: initialDate);
+        },
         tooltip: 'Add task or event',
         child: const Icon(Icons.add, size: 28),
       ),
@@ -42,7 +64,7 @@ class ShellScaffold extends ConsumerWidget {
               activeIcon: Icons.home_rounded,
               label: 'Home',
               selected: currentIndex == 0,
-              onTap: () => _onTap(0),
+              onTap: () => _onTap(0, ref),
               color: theme.colorScheme.primary,
             ),
             _NavItem(
@@ -50,7 +72,7 @@ class ShellScaffold extends ConsumerWidget {
               activeIcon: Icons.dashboard,
               label: 'Matrix',
               selected: currentIndex == 1,
-              onTap: () => _onTap(1),
+              onTap: () => _onTap(1, ref),
               color: theme.colorScheme.primary,
             ),
             // Center gap for FAB
@@ -60,7 +82,7 @@ class ShellScaffold extends ConsumerWidget {
               activeIcon: Icons.event_note,
               label: 'Calendar',
               selected: currentIndex == 2,
-              onTap: () => _onTap(2),
+              onTap: () => _onTap(2, ref),
               color: theme.colorScheme.primary,
             ),
             _NavItem(
@@ -68,7 +90,7 @@ class ShellScaffold extends ConsumerWidget {
               activeIcon: Icons.tune,
               label: 'Settings',
               selected: currentIndex == 3,
-              onTap: () => _onTap(3),
+              onTap: () => _onTap(3, ref),
               color: theme.colorScheme.primary,
             ),
           ],
@@ -97,6 +119,7 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final inactive = AppSemanticColors.navInactive(context);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -107,7 +130,7 @@ class _NavItem extends StatelessWidget {
           children: [
             Icon(
               selected ? activeIcon : icon,
-              color: selected ? color : const Color(0xFFB0B0C8),
+              color: selected ? color : inactive,
               size: 24,
             ),
             const SizedBox(height: 3),
@@ -116,7 +139,7 @@ class _NavItem extends StatelessWidget {
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                color: selected ? color : const Color(0xFFB0B0C8),
+                color: selected ? color : inactive,
                 letterSpacing: 0.2,
               ),
             ),

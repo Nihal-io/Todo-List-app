@@ -4,7 +4,57 @@ enum TaskPriority { low, medium, high }
 
 enum TaskKind { task, event }
 
-const Color kDefaultTaskColor = Color(0xFF5C6BC0);
+enum MatrixQuadrant {
+  /// Urgent & Important — do it now.
+  doFirst,
+  /// Not Urgent & Important — plan and schedule it.
+  schedule,
+  /// Urgent & Not Important — delegate it.
+  delegate,
+  /// Not Urgent & Not Important — eliminate it.
+  eliminate;
+
+  Color get color {
+    switch (this) {
+      case MatrixQuadrant.doFirst:
+        return const Color(0xFFEF5350);
+      case MatrixQuadrant.schedule:
+        return const Color(0xFF42A5F5);
+      case MatrixQuadrant.delegate:
+        return const Color(0xFFFFA726);
+      case MatrixQuadrant.eliminate:
+        return const Color(0xFF90A4AE);
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case MatrixQuadrant.doFirst:
+        return 'Do';
+      case MatrixQuadrant.schedule:
+        return 'Schedule';
+      case MatrixQuadrant.delegate:
+        return 'Delegate';
+      case MatrixQuadrant.eliminate:
+        return 'Eliminate';
+    }
+  }
+
+  String get subtitle {
+    switch (this) {
+      case MatrixQuadrant.doFirst:
+        return 'Urgent & Important';
+      case MatrixQuadrant.schedule:
+        return 'Not Urgent & Important';
+      case MatrixQuadrant.delegate:
+        return 'Urgent & Not Important';
+      case MatrixQuadrant.eliminate:
+        return 'Not Urgent & Not Important';
+    }
+  }
+}
+
+const MatrixQuadrant kDefaultQuadrant = MatrixQuadrant.schedule;
 
 DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
@@ -41,7 +91,7 @@ class Task {
     this.completed = false,
     Set<DateTime>? completedDates,
     this.priority = TaskPriority.medium,
-    this.color = kDefaultTaskColor,
+    this.quadrant = kDefaultQuadrant,
   }) : completedDates = completedDates ?? <DateTime>{};
 
   final String id;
@@ -63,7 +113,9 @@ class Task {
   final Set<DateTime> completedDates;
 
   final TaskPriority priority;
-  final Color color;
+  final MatrixQuadrant quadrant;
+
+  Color get color => quadrant.color;
 
   bool get isEvent => kind == TaskKind.event;
   bool get isRecurring => recurrence != null;
@@ -92,7 +144,7 @@ class Task {
   }
 
   bool isCompletedOn(DateTime day) {
-    if (isEvent) return hasAutoCompleted;
+    if (isEvent) return completed || hasAutoCompleted;
     if (isRecurring) {
       return completedDates.any((d) => _sameDay(d, day));
     }
@@ -104,6 +156,37 @@ class Task {
     if (completed) return false;
     final due = _dateOnly(endDate ?? startDate);
     return _dateOnly(day).isAfter(due);
+  }
+
+  /// The next day after [after] when this task occurs, or null if none.
+  DateTime? nextOccurrenceAfter(DateTime after) {
+    final afterDay = _dateOnly(after);
+    if (isRecurring) {
+      var cursor = afterDay.add(const Duration(days: 1));
+      final untilDay =
+          recurrence!.until != null ? _dateOnly(recurrence!.until!) : null;
+      // Search up to ~2 years ahead.
+      for (var i = 0; i < 730; i++) {
+        if (untilDay != null && cursor.isAfter(untilDay)) return null;
+        if (recurrence!.appliesOn(cursor)) return cursor;
+        cursor = cursor.add(const Duration(days: 1));
+      }
+      return null;
+    }
+    final start = _dateOnly(startDate);
+    if (start.isAfter(afterDay)) return start;
+    return null;
+  }
+
+  /// Whether this task belongs in the Home "Upcoming" tab (relative to [today]).
+  bool isUpcomingFrom(DateTime today) {
+    if (isRecurring) return nextOccurrenceAfter(today) != null;
+    if (isEvent) {
+      if (completed || hasAutoCompleted) return false;
+      return _dateOnly(startDate).isAfter(_dateOnly(today));
+    }
+    if (completed) return false;
+    return _dateOnly(startDate).isAfter(_dateOnly(today));
   }
 
   Task copyWith({
@@ -118,7 +201,7 @@ class Task {
     bool? completed,
     Set<DateTime>? completedDates,
     TaskPriority? priority,
-    Color? color,
+    MatrixQuadrant? quadrant,
   }) {
     return Task(
       id: id ?? this.id,
@@ -131,7 +214,7 @@ class Task {
       completed: completed ?? this.completed,
       completedDates: completedDates ?? this.completedDates,
       priority: priority ?? this.priority,
-      color: color ?? this.color,
+      quadrant: quadrant ?? this.quadrant,
     );
   }
 }

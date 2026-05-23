@@ -27,15 +27,21 @@ Because the data model is unified (see [`calendar.md`](calendar.md)), the same f
 The bottom sheet has the following sections, top to bottom:
 
 1. **Drag handle** — small pill at the top
-2. **Title** — auto-focused text field, sentence capitalization
-3. **Category** — wrap of colored chips (6 categories: Exam, Hackathon, Gym, Study, Work, Other). Selected chip is filled with the category's color; unselected chips are a tinted variant.
-4. **Priority** — wrap of 3 chips (Low / Medium / High), color-coded green/orange/red. Same selection style as categories.
-5. **When** — two stacked picker rows:
+2. **Kind toggle** — `SegmentedButton<TaskKind>` with two options: `Task` and `Event`. Switching to `Event` clears any selected weekdays and the repeat-until state.
+3. **Title** — auto-focused text field, sentence capitalization
+4. **Color** — row of 8 colored circle swatches. Tap to select; selected swatch shows a white check with a soft glow.
+5. **Priority** (task only) — three chips (Low / Medium / High), color-coded green/orange/red. Events have no priority and skip this section.
+6. **When** — stacked picker rows:
    - **Start Date** row — opens a date picker. Defaults to whatever day is currently selected in the calendar.
-   - **Until…** row — by default shows the placeholder text `Until… (single day)`. Tapping it opens a date picker constrained to `firstDate: startDate`. Once set, the row shows the chosen date and an `X` button on the right that clears it back to single-day.
-6. **Add** button — primary indigo button at the bottom
-
-If the title is empty when Add is tapped, the form is a no-op (it does not dismiss).
+   - **Until Date** row — shown only when no weekdays are selected. Optional for tasks (makes them multi-day); required for events.
+7. **Repeat** (task only) — Samsung alarm style:
+   - Row of 7 weekday chips (S M T W T F S, Sunday-first). Multi-select.
+   - When at least one weekday is selected, the simple "Until Date" row above hides and is replaced by:
+     - "Repeats until" with two chips: `Forever` (default) and `Pick a date`. Picking a date switches selection to the date chip; tapping `Forever` again clears the date.
+8. **Add** button — primary indigo button at the bottom. Disabled when:
+   - Title is empty, OR
+   - Kind is Event and no end date is set, OR
+   - Weekdays are selected and "Repeats until" is set to a date that hasn't been picked yet.
 
 ## Pre-fill Behavior
 
@@ -47,45 +53,65 @@ The form reads `selectedCalendarDayProvider` in `initState` to seed `_startDate`
 
 This sharing is one-way: the sheet reads the provider but does not write back to it on submit.
 
-## Single-Day vs Multi-Day
+## Shapes a Task Can Take
 
-The unified `Task` model treats single-day vs multi-day as a property of the task itself (`endDate == null` means single-day). The form mirrors this:
+The same form produces several different shapes depending on the kind + recurrence combination:
 
-- Leave **Until…** untouched → `endDate: null` → single-day task → shows as a dot on the calendar
-- Set **Until…** to a date → multi-day task → shows as a spanning bar on the calendar
+| Configuration | Result |
+|---------------|--------|
+| Task, no end date, no weekdays | Single-day task. Dot on the calendar. |
+| Task, with end date, no weekdays | Multi-day task. Bar on the calendar. One final tick. |
+| Task, weekdays selected, repeat-until Forever | Recurring task forever. Dot on each matching day. Per-day ticking. |
+| Task, weekdays selected, repeat-until date | Recurring task bounded by date. Same as above but stops on the date. |
+| Event, end date required | Multi-day event. Translucent bar on the calendar. No checkbox. Auto-completes once past end date. |
 
-If the user changes the start date to a value after a previously chosen end date, the end date is automatically cleared to keep the range valid.
+A task is **recurring XOR multi-day**, never both. The UI hides the "Until Date" row when weekdays are selected so the user can't try.
+
+If the user changes the start date to a value after a previously chosen end date or repeat-until, those fields are auto-cleared to keep the range valid.
 
 ## How to Test
 
 1. Launch the app
 2. Navigate to the Calendar tab and tap any date (optional — sets the default start date)
 3. Tap the center `+` FAB
-4. Type a title
-5. Pick a category and priority
-6. Confirm or change Start Date
-7. To make it a multi-day task, tap the "Until…" row and pick an end date; tap `X` to revert to single-day
-8. Tap **Add**
-9. The task appears immediately on the calendar (dot for single-day, spanning bar for multi-day) and in the day panel for every day it covers
-10. Tap a tile in the day panel to toggle completion
+4. Pick **Task** or **Event** at the top of the sheet
+5. Type a title and pick a color
+6. **For tasks**: pick a priority
+7. Confirm or change the Start Date
+8. **For events**: pick the required Until Date
+9. **For tasks (optional)**: tap one or more weekday chips to make it recurring; if recurring, pick `Forever` or a "Repeats until" date
+10. **For tasks (not recurring, optional)**: tap "Until…" to make it a multi-day bar instead
+11. Tap **Add** (the button is disabled if required fields are missing)
+12. The task appears immediately on the calendar:
+    - Single-day task → dot
+    - Multi-day task → solid bar
+    - Event → translucent bar with event icon in the day panel (no checkbox)
+    - Recurring task → dot on each matching weekday going forward
+13. Tap a task tile in the day panel to toggle completion (per-day for recurring, single for non-recurring; events have no tap behavior)
 
 ## Submit Flow
 
 ```mermaid
-flowchart LR
+flowchart TB
     fab[FAB tap] --> sheet[showAddItemSheet]
     sheet --> initState[initState reads selectedCalendarDayProvider]
     initState --> form[Form rendered]
     form --> submit[Add tapped]
-    submit -->|"title empty"| noop[No-op]
-    submit -->|"title set"| addTask[tasksProvider.notifier.add Task]
-    addTask --> dismiss[Navigator.pop]
-    addTask -.->|"watch"| calendar[Calendar rebuilds with new task]
+    submit --> kindCheck{kind?}
+    kindCheck -->|event| ev[Build Task kind=event with endDate]
+    kindCheck -->|task| recCheck{weekdays selected?}
+    recCheck -->|yes| rec[Build Task with WeeklyRecurrence]
+    recCheck -->|no| simple[Build Task with optional endDate]
+    ev --> store[(tasksProvider)]
+    rec --> store
+    simple --> store
+    store --> dismiss[Navigator.pop]
+    store -.->|watch| calendar[Calendar rebuilds]
 ```
 
 ## What's Next (Not Done)
 
 - Edit / delete from the bottom sheet (currently it only creates)
 - Tap a task tile in the calendar's day panel to open the same sheet pre-filled for editing
-- Persist via Drift so tasks survive restarts
+- Persist via Drift so tasks survive restarts (recurrence + `completedDates` likely become a side table)
 - Quick-add affordances (e.g. long-press FAB for a fast single-day task)
