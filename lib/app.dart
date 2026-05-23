@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'models/app_settings.dart';
 import 'providers/settings_provider.dart';
+import 'providers/tasks_provider.dart';
 import 'routing/router.dart';
 import 'theme/app_theme.dart';
 
@@ -11,12 +14,29 @@ class App extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Keep the in-memory notification flag in lockstep with the persisted
+    // setting. Done here (top-level) so the tasks notifier can read it
+    // synchronously when scheduling reminders during CRUD operations.
+    ref.listen<AsyncValue<AppSettings>>(settingsProvider, (prev, next) {
+      final value = next.valueOrNull;
+      if (value == null) return;
+      final current = ref.read(notificationsEnabledProvider);
+      if (current != value.notificationsEnabled) {
+        ref.read(notificationsEnabledProvider.notifier).state =
+            value.notificationsEnabled;
+        // Apply downstream: schedule or cancel everything in one shot.
+        unawaited(ref
+            .read(tasksProvider.notifier)
+            .applyNotificationsEnabled(value.notificationsEnabled));
+      }
+    });
+
     final asyncSettings = ref.watch(settingsProvider);
 
     // Block first paint until preferences load so the user does not see a
     // flash of the default theme when their persisted choice differs.
     return asyncSettings.when(
-      loading: () => const _SettingsBootstrap(),
+      loading: () => const _Bootstrap(),
       error: (_, __) => MaterialApp.router(
         title: 'Todo',
         debugShowCheckedModeBanner: false,
@@ -53,8 +73,8 @@ class App extends ConsumerWidget {
   }
 }
 
-class _SettingsBootstrap extends StatelessWidget {
-  const _SettingsBootstrap();
+class _Bootstrap extends StatelessWidget {
+  const _Bootstrap();
 
   @override
   Widget build(BuildContext context) {

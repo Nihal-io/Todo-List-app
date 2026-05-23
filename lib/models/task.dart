@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../shared/date_utils.dart';
+import 'sub_task.dart';
+
 enum TaskPriority { low, medium, high }
 
 enum TaskKind { task, event }
@@ -56,11 +59,6 @@ enum MatrixQuadrant {
 
 const MatrixQuadrant kDefaultQuadrant = MatrixQuadrant.schedule;
 
-DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
-
-bool _sameDay(DateTime a, DateTime b) =>
-    a.year == b.year && a.month == b.month && a.day == b.day;
-
 /// Weekly recurrence rule. `weekdays` uses `DateTime.weekday` values
 /// (1 = Monday ... 7 = Sunday). `until` is the last day the rule applies on;
 /// `null` means the rule repeats forever.
@@ -73,11 +71,71 @@ class WeeklyRecurrence {
   bool appliesOn(DateTime day) {
     if (weekdays.isEmpty) return false;
     if (!weekdays.contains(day.weekday)) return false;
-    if (until != null && _dateOnly(day).isAfter(_dateOnly(until!))) {
+    if (until != null && dateOnly(day).isAfter(dateOnly(until!))) {
       return false;
     }
     return true;
   }
+
+  Map<String, dynamic> toJson() => {
+        'weekdays': weekdays.toList()..sort(),
+        if (until != null) 'until': until!.toIso8601String(),
+      };
+
+  factory WeeklyRecurrence.fromJson(Map<String, dynamic> json) {
+    final raw = json['weekdays'];
+    final wd = <int>{};
+    if (raw is List) {
+      for (final v in raw) {
+        if (v is int) {
+          wd.add(v);
+        } else if (v is num) {
+          wd.add(v.toInt());
+        }
+      }
+    }
+    final untilStr = json['until'];
+    final until = untilStr is String ? DateTime.tryParse(untilStr) : null;
+    return WeeklyRecurrence(weekdays: wd, until: until);
+  }
+}
+
+/// Wall-clock time slice (HH:mm) stored as minutes since midnight.
+@immutable
+class TaskTime {
+  const TaskTime({required this.hour, required this.minute});
+
+  factory TaskTime.fromTimeOfDay(TimeOfDay t) =>
+      TaskTime(hour: t.hour, minute: t.minute);
+
+  final int hour;
+  final int minute;
+
+  int get minutesSinceMidnight => hour * 60 + minute;
+
+  TimeOfDay toTimeOfDay() => TimeOfDay(hour: hour, minute: minute);
+
+  /// 12-hour formatted string (e.g. `9:30 AM`).
+  String formatTwelveHour() {
+    final h = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+    final m = minute.toString().padLeft(2, '0');
+    final ampm = hour >= 12 ? 'PM' : 'AM';
+    return '$h:$m $ampm';
+  }
+
+  Map<String, dynamic> toJson() => {'h': hour, 'm': minute};
+
+  factory TaskTime.fromJson(Map<String, dynamic> json) => TaskTime(
+        hour: (json['h'] as num?)?.toInt() ?? 0,
+        minute: (json['m'] as num?)?.toInt() ?? 0,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is TaskTime && other.hour == hour && other.minute == minute;
+
+  @override
+  int get hashCode => Object.hash(hour, minute);
 }
 
 class Task {
@@ -92,7 +150,17 @@ class Task {
     Set<DateTime>? completedDates,
     this.priority = TaskPriority.medium,
     this.quadrant = kDefaultQuadrant,
-  }) : completedDates = completedDates ?? <DateTime>{};
+    this.notes = '',
+    List<SubTask>? subtasks,
+    this.startTime,
+    this.endTime,
+    List<String>? tags,
+    double? sortIndex,
+  })  : completedDates = completedDates ?? <DateTime>{},
+        subtasks = subtasks ?? const <SubTask>[],
+        tags = tags ?? const <String>[],
+        sortIndex =
+            sortIndex ?? DateTime.now().microsecondsSinceEpoch.toDouble();
 
   final String id;
   final String title;
@@ -115,38 +183,68 @@ class Task {
   final TaskPriority priority;
   final MatrixQuadrant quadrant;
 
+  /// Free-form long-form description / context for the task.
+  final String notes;
+
+  /// Nested checkable items. Empty by default; surfaced in the detail sheet
+  /// but not in the compact row tiles.
+  final List<SubTask> subtasks;
+
+  /// Optional start-of-day clock time. Useful for events that begin at a
+  /// specific hour (e.g. "Hackathon at 10:00 AM").
+  final TaskTime? startTime;
+
+  /// Optional end-of-day clock time, paired with [startTime].
+  final TaskTime? endTime;
+
+  /// Free-form labels orthogonal to quadrant.
+  final List<String> tags;
+
+  /// Persistent ordering hint used by drag-to-reorder. Lower comes first.
+  /// Defaults to a creation timestamp so insertion order is preserved when
+  /// no manual reorder has occurred.
+  final double sortIndex;
+
   Color get color => quadrant.color;
 
   bool get isEvent => kind == TaskKind.event;
   bool get isRecurring => recurrence != null;
   bool get isMultiDay => !isRecurring && endDate != null;
 
-  /// True if this task is visible / actionable on [day].
+  bool get hasSubtasks => subtasks.isNotEmpty;
+
+  int get completedSubtaskCount =>
+      subtasks.where((s) => s.completed).length;
+
   bool isActiveOn(DateTime day) {
-    final d = _dateOnly(day);
+    final d = dateOnly(day);
     if (isRecurring) return recurrence!.appliesOn(d);
-    final s = _dateOnly(startDate);
-    final e = endDate == null ? s : _dateOnly(endDate!);
+    final s = dateOnly(startDate);
+    final e = endDate == null ? s : dateOnly(endDate!);
     return !d.isBefore(s) && !d.isAfter(e);
   }
 
-  bool isStartDay(DateTime day) => _sameDay(day, startDate);
+  bool isStartDay(DateTime day) => sameDay(day, startDate);
 
-  bool isEndDay(DateTime day) =>
-      _sameDay(day, endDate ?? startDate);
+  bool isEndDay(DateTime day) => sameDay(day, endDate ?? startDate);
 
-  /// Event auto-completes once its end date has passed.
-  bool get hasAutoCompleted {
+  /// Event auto-completion relative to [today].
+  ///
+  /// Note: callers who need reactivity to the clock provider should compare
+  /// against a passed-in `today` instead of calling this getter, which reads
+  /// `DateTime.now()` directly and may lag behind the reactive clock.
+  bool autoCompletedOn(DateTime today) {
     if (!isEvent) return false;
-    final today = _dateOnly(DateTime.now());
-    final e = _dateOnly(endDate ?? startDate);
-    return today.isAfter(e);
+    final e = dateOnly(endDate ?? startDate);
+    return dateOnly(today).isAfter(e);
   }
 
+  bool get hasAutoCompleted => autoCompletedOn(DateTime.now());
+
   bool isCompletedOn(DateTime day) {
-    if (isEvent) return completed || hasAutoCompleted;
+    if (isEvent) return completed || autoCompletedOn(day);
     if (isRecurring) {
-      return completedDates.any((d) => _sameDay(d, day));
+      return completedDates.any((d) => sameDay(d, day));
     }
     return completed;
   }
@@ -154,17 +252,17 @@ class Task {
   bool isOverdueOn(DateTime day) {
     if (isEvent || isRecurring) return false;
     if (completed) return false;
-    final due = _dateOnly(endDate ?? startDate);
-    return _dateOnly(day).isAfter(due);
+    final due = dateOnly(endDate ?? startDate);
+    return dateOnly(day).isAfter(due);
   }
 
   /// The next day after [after] when this task occurs, or null if none.
   DateTime? nextOccurrenceAfter(DateTime after) {
-    final afterDay = _dateOnly(after);
+    final afterDay = dateOnly(after);
     if (isRecurring) {
       var cursor = afterDay.add(const Duration(days: 1));
       final untilDay =
-          recurrence!.until != null ? _dateOnly(recurrence!.until!) : null;
+          recurrence!.until != null ? dateOnly(recurrence!.until!) : null;
       // Search up to ~2 years ahead.
       for (var i = 0; i < 730; i++) {
         if (untilDay != null && cursor.isAfter(untilDay)) return null;
@@ -173,20 +271,39 @@ class Task {
       }
       return null;
     }
-    final start = _dateOnly(startDate);
+    final start = dateOnly(startDate);
     if (start.isAfter(afterDay)) return start;
     return null;
   }
 
-  /// Whether this task belongs in the Home "Upcoming" tab (relative to [today]).
   bool isUpcomingFrom(DateTime today) {
     if (isRecurring) return nextOccurrenceAfter(today) != null;
     if (isEvent) {
-      if (completed || hasAutoCompleted) return false;
-      return _dateOnly(startDate).isAfter(_dateOnly(today));
+      if (completed || autoCompletedOn(today)) return false;
+      return dateOnly(startDate).isAfter(dateOnly(today));
     }
     if (completed) return false;
-    return _dateOnly(startDate).isAfter(_dateOnly(today));
+    return dateOnly(startDate).isAfter(dateOnly(today));
+  }
+
+  /// When this task next "fires" for a reminder, or null if it never does.
+  /// For non-recurring tasks this is the start moment (with [startTime] if
+  /// set, else 9:00 AM on [startDate]); recurring tasks return the next
+  /// occurrence after [after] at the same time.
+  DateTime? nextReminderAfter(DateTime after) {
+    DateTime? day;
+    if (isRecurring) {
+      day = nextOccurrenceAfter(after);
+      if (day == null) return null;
+    } else {
+      final s = dateOnly(startDate);
+      if (s.isBefore(dateOnly(after))) return null;
+      day = s;
+    }
+    final t = startTime;
+    final hour = t?.hour ?? 9;
+    final minute = t?.minute ?? 0;
+    return DateTime(day.year, day.month, day.day, hour, minute);
   }
 
   Task copyWith({
@@ -202,6 +319,14 @@ class Task {
     Set<DateTime>? completedDates,
     TaskPriority? priority,
     MatrixQuadrant? quadrant,
+    String? notes,
+    List<SubTask>? subtasks,
+    TaskTime? startTime,
+    bool clearStartTime = false,
+    TaskTime? endTime,
+    bool clearEndTime = false,
+    List<String>? tags,
+    double? sortIndex,
   }) {
     return Task(
       id: id ?? this.id,
@@ -215,6 +340,114 @@ class Task {
       completedDates: completedDates ?? this.completedDates,
       priority: priority ?? this.priority,
       quadrant: quadrant ?? this.quadrant,
+      notes: notes ?? this.notes,
+      subtasks: subtasks ?? this.subtasks,
+      startTime: clearStartTime ? null : (startTime ?? this.startTime),
+      endTime: clearEndTime ? null : (endTime ?? this.endTime),
+      tags: tags ?? this.tags,
+      sortIndex: sortIndex ?? this.sortIndex,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'startDate': startDate.toIso8601String(),
+        if (endDate != null) 'endDate': endDate!.toIso8601String(),
+        'kind': kind.name,
+        if (recurrence != null) 'recurrence': recurrence!.toJson(),
+        'completed': completed,
+        'completedDates': completedDates
+            .map((d) => DateTime(d.year, d.month, d.day).toIso8601String())
+            .toList(),
+        'priority': priority.name,
+        'quadrant': quadrant.name,
+        if (notes.isNotEmpty) 'notes': notes,
+        if (subtasks.isNotEmpty)
+          'subtasks': subtasks.map((s) => s.toJson()).toList(),
+        if (startTime != null) 'startTime': startTime!.toJson(),
+        if (endTime != null) 'endTime': endTime!.toJson(),
+        if (tags.isNotEmpty) 'tags': tags,
+        'sortIndex': sortIndex,
+      };
+
+  factory Task.fromJson(Map<String, dynamic> json) {
+    T? enumByName<T extends Enum>(List<T> values, Object? raw) {
+      if (raw is! String) return null;
+      for (final v in values) {
+        if (v.name == raw) return v;
+      }
+      return null;
+    }
+
+    final completedDatesRaw = json['completedDates'];
+    final completedDates = <DateTime>{};
+    if (completedDatesRaw is List) {
+      for (final v in completedDatesRaw) {
+        if (v is String) {
+          final d = DateTime.tryParse(v);
+          if (d != null) completedDates.add(DateTime(d.year, d.month, d.day));
+        }
+      }
+    }
+
+    final subtasksRaw = json['subtasks'];
+    final subtasks = <SubTask>[];
+    if (subtasksRaw is List) {
+      for (final v in subtasksRaw) {
+        if (v is Map<String, dynamic>) {
+          subtasks.add(SubTask.fromJson(v));
+        } else if (v is Map) {
+          subtasks.add(SubTask.fromJson(v.cast<String, dynamic>()));
+        }
+      }
+    }
+
+    final tagsRaw = json['tags'];
+    final tags = <String>[];
+    if (tagsRaw is List) {
+      for (final v in tagsRaw) {
+        if (v is String) tags.add(v);
+      }
+    }
+
+    TaskTime? readTime(Object? raw) {
+      if (raw is Map<String, dynamic>) return TaskTime.fromJson(raw);
+      if (raw is Map) return TaskTime.fromJson(raw.cast<String, dynamic>());
+      return null;
+    }
+
+    final recurrenceRaw = json['recurrence'];
+    WeeklyRecurrence? recurrence;
+    if (recurrenceRaw is Map<String, dynamic>) {
+      recurrence = WeeklyRecurrence.fromJson(recurrenceRaw);
+    } else if (recurrenceRaw is Map) {
+      recurrence =
+          WeeklyRecurrence.fromJson(recurrenceRaw.cast<String, dynamic>());
+    }
+
+    return Task(
+      id: json['id'] as String,
+      title: json['title'] as String? ?? '',
+      startDate: DateTime.parse(json['startDate'] as String),
+      endDate: (json['endDate'] is String)
+          ? DateTime.tryParse(json['endDate'] as String)
+          : null,
+      kind: enumByName(TaskKind.values, json['kind']) ?? TaskKind.task,
+      recurrence: recurrence,
+      completed: json['completed'] as bool? ?? false,
+      completedDates: completedDates,
+      priority:
+          enumByName(TaskPriority.values, json['priority']) ?? TaskPriority.medium,
+      quadrant: enumByName(MatrixQuadrant.values, json['quadrant']) ??
+          kDefaultQuadrant,
+      notes: json['notes'] as String? ?? '',
+      subtasks: subtasks,
+      startTime: readTime(json['startTime']),
+      endTime: readTime(json['endTime']),
+      tags: tags,
+      sortIndex: (json['sortIndex'] as num?)?.toDouble() ??
+          DateTime.now().microsecondsSinceEpoch.toDouble(),
     );
   }
 }

@@ -1,48 +1,59 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
+
+import '../models/sub_task.dart';
 import '../models/task.dart';
+import '../services/notification_service.dart';
+import '../services/task_repository.dart';
+import '../shared/date_utils.dart';
 
 const _uuid = Uuid();
 
-DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+// ---------------------------------------------------------------------------
+// Sample data — used the first time the app boots (no persisted file yet).
+// ---------------------------------------------------------------------------
 
-/// Fresh sample tasks — every item uses a [MatrixQuadrant] for its color.
-/// Call [TasksNotifier.reseed] to replace in-memory state with this set.
 List<Task> buildSampleTasks() {
-  final now = DateTime.now();
-  final today = DateTime(now.year, now.month, now.day);
-  final endOfNextMonth = DateTime(today.year, today.month + 2, 0);
+  final today_ = today();
+  final endOfNextMonth = DateTime(today_.year, today_.month + 2, 0);
 
   return [
-    // ── Do First (red) ──────────────────────────────────────────────────
     Task(
       id: _uuid.v4(),
       title: 'Submit assignment',
-      startDate: today,
+      startDate: today_,
       priority: TaskPriority.high,
       quadrant: MatrixQuadrant.doFirst,
+      notes: 'Double-check the references section before uploading.',
+      subtasks: [
+        SubTask(id: _uuid.v4(), title: 'Finalize draft'),
+        SubTask(id: _uuid.v4(), title: 'Run plagiarism check'),
+        SubTask(id: _uuid.v4(), title: 'Upload PDF'),
+      ],
     ),
     Task(
       id: _uuid.v4(),
       title: 'Prepare presentation',
-      startDate: today.add(const Duration(days: 2)),
+      startDate: today_.add(const Duration(days: 2)),
       priority: TaskPriority.high,
       quadrant: MatrixQuadrant.doFirst,
     ),
     Task(
       id: _uuid.v4(),
       title: 'Exams',
-      startDate: today.subtract(const Duration(days: 1)),
-      endDate: today.add(const Duration(days: 3)),
+      startDate: today_.subtract(const Duration(days: 1)),
+      endDate: today_.add(const Duration(days: 3)),
       kind: TaskKind.event,
       quadrant: MatrixQuadrant.doFirst,
+      startTime: const TaskTime(hour: 9, minute: 0),
+      endTime: const TaskTime(hour: 12, minute: 0),
     ),
-
-    // ── Schedule (blue) ─────────────────────────────────────────────────
     Task(
       id: _uuid.v4(),
       title: 'Read chapter 4',
-      startDate: today,
+      startDate: today_,
       priority: TaskPriority.medium,
       quadrant: MatrixQuadrant.schedule,
       completed: true,
@@ -50,25 +61,23 @@ List<Task> buildSampleTasks() {
     Task(
       id: _uuid.v4(),
       title: 'Write report',
-      startDate: today.add(const Duration(days: 1)),
-      endDate: today.add(const Duration(days: 3)),
+      startDate: today_.add(const Duration(days: 1)),
+      endDate: today_.add(const Duration(days: 3)),
       priority: TaskPriority.medium,
       quadrant: MatrixQuadrant.schedule,
     ),
     Task(
       id: _uuid.v4(),
       title: 'Hackathon',
-      startDate: today.add(const Duration(days: 6)),
-      endDate: today.add(const Duration(days: 8)),
+      startDate: today_.add(const Duration(days: 6)),
+      endDate: today_.add(const Duration(days: 8)),
       kind: TaskKind.event,
       quadrant: MatrixQuadrant.schedule,
     ),
-
-    // ── Delegate (orange) ───────────────────────────────────────────────
     Task(
       id: _uuid.v4(),
       title: 'Gym',
-      startDate: today,
+      startDate: today_,
       recurrence: const WeeklyRecurrence(
         weekdays: {DateTime.monday, DateTime.wednesday, DateTime.friday},
       ),
@@ -78,16 +87,14 @@ List<Task> buildSampleTasks() {
     Task(
       id: _uuid.v4(),
       title: 'Reply to emails',
-      startDate: today.subtract(const Duration(days: 2)),
+      startDate: today_.subtract(const Duration(days: 2)),
       priority: TaskPriority.medium,
       quadrant: MatrixQuadrant.delegate,
     ),
-
-    // ── Eliminate (grey) ────────────────────────────────────────────────
     Task(
       id: _uuid.v4(),
       title: 'Yoga',
-      startDate: today,
+      startDate: today_,
       recurrence: WeeklyRecurrence(
         weekdays: const {DateTime.tuesday, DateTime.thursday},
         until: endOfNextMonth,
@@ -98,55 +105,294 @@ List<Task> buildSampleTasks() {
   ];
 }
 
-class TasksNotifier extends StateNotifier<List<Task>> {
-  TasksNotifier() : super(buildSampleTasks());
+// ---------------------------------------------------------------------------
+// Services
+// ---------------------------------------------------------------------------
 
-  /// Replace all tasks with the canonical sample set (matrix colors only).
-  void reseed() => state = buildSampleTasks();
+final taskRepositoryProvider =
+    Provider<TaskRepository>((ref) => TaskRepository());
 
-  void add(Task task) => state = [...state, task];
+final notificationServiceProvider =
+    Provider<NotificationService>((ref) => NotificationService());
 
-  void remove(String id) => state = state.where((t) => t.id != id).toList();
+/// Convenience to override [notificationServiceProvider] with a pre-built,
+/// already-initialised instance from `main()`.
+Override notificationServiceProviderOverride(NotificationService instance) =>
+    notificationServiceProvider.overrideWithValue(instance);
 
-  /// Toggle for non-recurring tasks and events (flips the single `completed` bool).
-  /// For recurring tasks use [toggleForDay].
-  void toggle(String id) => state = state.map((t) {
-        if (t.id != id) return t;
-        if (t.isRecurring) return t;
-        return t.copyWith(completed: !t.completed);
-      }).toList();
+/// Whether local notifications are enabled. Persisted via SharedPreferences
+/// (see [settingsProvider]).
+final notificationsEnabledProvider = StateProvider<bool>((ref) => false);
 
-  /// Toggle completion for a specific day. Recurring tasks add/remove the day
-  /// from `completedDates`. Non-recurring tasks and events flip [completed].
-  void toggleForDay(String id, DateTime day) {
-    state = state.map((t) {
-      if (t.id != id) return t;
-      if (t.isRecurring) {
-        final d = _dateOnly(day);
-        final next = {...t.completedDates};
-        final existing = next.where((x) =>
-            x.year == d.year && x.month == d.month && x.day == d.day).toList();
-        if (existing.isEmpty) {
-          next.add(d);
-        } else {
-          next.removeAll(existing);
-        }
-        return t.copyWith(completedDates: next);
-      }
-      return t.copyWith(completed: !t.completed);
-    }).toList();
+// ---------------------------------------------------------------------------
+// Tasks notifier — async load/save, in-memory CRUD
+// ---------------------------------------------------------------------------
+
+class TasksNotifier extends AsyncNotifier<List<Task>> {
+  late TaskRepository _repo;
+  late NotificationService _notifications;
+
+  @override
+  Future<List<Task>> build() async {
+    _repo = ref.watch(taskRepositoryProvider);
+    _notifications = ref.watch(notificationServiceProvider);
+    final loaded = await _repo.load();
+    if (loaded == null) {
+      final samples = buildSampleTasks();
+      unawaited(_repo.save(samples));
+      _rescheduleAll(samples);
+      return samples;
+    }
+    _rescheduleAll(loaded);
+    return loaded;
   }
 
-  void update(Task task) =>
-      state = state.map((t) => t.id == task.id ? task : t).toList();
+  List<Task> get _current => state.valueOrNull ?? const <Task>[];
+
+  Future<void> _commit(List<Task> next) async {
+    state = AsyncData(next);
+    await _repo.save(next);
+  }
+
+  bool get _notificationsEnabled =>
+      ref.read(notificationsEnabledProvider);
+
+  void _rescheduleAll(List<Task> tasks) {
+    if (!_notificationsEnabled) return;
+    for (final t in tasks) {
+      unawaited(_notifications.scheduleForTask(t, enabled: true));
+    }
+  }
+
+  /// Replace all tasks with the canonical sample set.
+  Future<void> reseed() async {
+    await _notifications.cancelAll();
+    final next = buildSampleTasks();
+    await _commit(next);
+    _rescheduleAll(next);
+  }
+
+  Future<void> add(Task task) async {
+    final next = [..._current, task];
+    await _commit(next);
+    if (_notificationsEnabled) {
+      unawaited(_notifications.scheduleForTask(task, enabled: true));
+    }
+  }
+
+  /// Removes the task and returns it so the caller (e.g. an "Undo" SnackBar)
+  /// can restore it later.
+  Future<Task?> remove(String id) async {
+    Task? removed;
+    final next = <Task>[];
+    for (final t in _current) {
+      if (t.id == id) {
+        removed = t;
+      } else {
+        next.add(t);
+      }
+    }
+    if (removed == null) return null;
+    await _commit(next);
+    unawaited(_notifications.cancelForTask(id));
+    return removed;
+  }
+
+  /// Restores a previously-removed task (used by Undo).
+  Future<void> restore(Task task) async {
+    if (_current.any((t) => t.id == task.id)) return;
+    final next = [..._current, task];
+    await _commit(next);
+    if (_notificationsEnabled) {
+      unawaited(_notifications.scheduleForTask(task, enabled: true));
+    }
+  }
+
+  /// Toggle for non-recurring tasks and events (flips the single `completed`
+  /// bool). For recurring tasks, use [toggleForDay].
+  Future<void> toggle(String id) async {
+    final next = <Task>[];
+    Task? updated;
+    for (final t in _current) {
+      if (t.id == id && !t.isRecurring) {
+        updated = t.copyWith(completed: !t.completed);
+        next.add(updated);
+      } else {
+        next.add(t);
+      }
+    }
+    await _commit(next);
+    if (updated != null) {
+      if (updated.completed) {
+        unawaited(_notifications.cancelForTask(updated.id));
+      } else if (_notificationsEnabled) {
+        unawaited(_notifications.scheduleForTask(updated, enabled: true));
+      }
+    }
+  }
+
+  /// Toggle completion for a specific day. Recurring tasks add/remove the day
+  /// from `completedDates`. Non-recurring tasks and events flip `completed`.
+  Future<void> toggleForDay(String id, DateTime day) async {
+    final next = <Task>[];
+    Task? updated;
+    for (final t in _current) {
+      if (t.id != id) {
+        next.add(t);
+        continue;
+      }
+      if (t.isRecurring) {
+        final d = dateOnly(day);
+        final newSet = {...t.completedDates};
+        final existing = newSet
+            .where((x) => x.year == d.year && x.month == d.month && x.day == d.day)
+            .toList();
+        if (existing.isEmpty) {
+          newSet.add(d);
+        } else {
+          newSet.removeAll(existing);
+        }
+        updated = t.copyWith(completedDates: newSet);
+      } else {
+        updated = t.copyWith(completed: !t.completed);
+      }
+      next.add(updated);
+    }
+    await _commit(next);
+    if (updated != null && !updated.isRecurring) {
+      if (updated.completed) {
+        unawaited(_notifications.cancelForTask(updated.id));
+      } else if (_notificationsEnabled) {
+        unawaited(_notifications.scheduleForTask(updated, enabled: true));
+      }
+    }
+  }
+
+  Future<void> updateTask(Task task) async {
+    final next = [
+      for (final t in _current) (t.id == task.id ? task : t),
+    ];
+    await _commit(next);
+    if (_notificationsEnabled) {
+      unawaited(_notifications.scheduleForTask(task, enabled: true));
+    } else {
+      unawaited(_notifications.cancelForTask(task.id));
+    }
+  }
+
+  /// Toggles a single subtask's completed state on its parent.
+  Future<void> toggleSubtask(String taskId, String subtaskId) async {
+    final next = [
+      for (final t in _current)
+        if (t.id == taskId)
+          t.copyWith(
+            subtasks: [
+              for (final s in t.subtasks)
+                if (s.id == subtaskId)
+                  s.copyWith(completed: !s.completed)
+                else
+                  s,
+            ],
+          )
+        else
+          t,
+    ];
+    await _commit(next);
+  }
+
+  // ---------------- Bulk operations (multi-select) ----------------
+
+  Future<void> bulkComplete(Set<String> ids, DateTime onDay) async {
+    final next = <Task>[];
+    for (final t in _current) {
+      if (!ids.contains(t.id)) {
+        next.add(t);
+        continue;
+      }
+      if (t.isRecurring) {
+        final d = dateOnly(onDay);
+        if (t.completedDates.any((x) => sameDay(x, d))) {
+          next.add(t);
+        } else {
+          next.add(t.copyWith(completedDates: {...t.completedDates, d}));
+        }
+      } else {
+        next.add(t.copyWith(completed: true));
+      }
+    }
+    await _commit(next);
+  }
+
+  Future<List<Task>> bulkDelete(Set<String> ids) async {
+    final removed = <Task>[];
+    final next = <Task>[];
+    for (final t in _current) {
+      if (ids.contains(t.id)) {
+        removed.add(t);
+      } else {
+        next.add(t);
+      }
+    }
+    await _commit(next);
+    for (final t in removed) {
+      unawaited(_notifications.cancelForTask(t.id));
+    }
+    return removed;
+  }
+
+  Future<void> bulkMoveQuadrant(Set<String> ids, MatrixQuadrant q) async {
+    final next = [
+      for (final t in _current)
+        if (ids.contains(t.id)) t.copyWith(quadrant: q) else t,
+    ];
+    await _commit(next);
+  }
+
+  // ---------------- Drag-to-reorder ----------------
+
+  /// Reorders the visible items so that [orderedIds] are produced in that
+  /// order. Tasks not in [orderedIds] keep their existing relative order
+  /// and end up after the reordered prefix.
+  ///
+  /// Implementation: rewrite `sortIndex` for the listed ids using a
+  /// monotonically increasing series so the home sort respects the new order.
+  Future<void> reorder(List<String> orderedIds) async {
+    if (orderedIds.isEmpty) return;
+    final base = DateTime.now().microsecondsSinceEpoch.toDouble();
+    final byId = {for (final t in _current) t.id: t};
+    var i = 0;
+    for (final id in orderedIds) {
+      final t = byId[id];
+      if (t == null) continue;
+      byId[id] = t.copyWith(sortIndex: base + i);
+      i++;
+    }
+    await _commit(byId.values.toList());
+  }
+
+  /// Toggle notifications on/off and re-schedule everything appropriately.
+  Future<void> applyNotificationsEnabled(bool enabled) async {
+    if (enabled) {
+      for (final t in _current) {
+        unawaited(_notifications.scheduleForTask(t, enabled: true));
+      }
+    } else {
+      await _notifications.cancelAll();
+    }
+  }
 }
 
 final tasksProvider =
-    StateNotifierProvider<TasksNotifier, List<Task>>((ref) => TasksNotifier());
+    AsyncNotifierProvider<TasksNotifier, List<Task>>(TasksNotifier.new);
 
-/// All tasks active on the given [day] — handles both non-recurring spans
-/// and recurring weekly rules.
+/// Synchronous view of the tasks list. While the initial load is in flight
+/// this returns an empty list, which is fine for downstream filtering.
+final tasksListProvider = Provider<List<Task>>((ref) {
+  return ref.watch(tasksProvider).valueOrNull ?? const <Task>[];
+});
+
+/// All tasks active on the given [day].
 final tasksForDayProvider = Provider.family<List<Task>, DateTime>((ref, day) {
-  final tasks = ref.watch(tasksProvider);
+  final tasks = ref.watch(tasksListProvider);
   return tasks.where((t) => t.isActiveOn(day)).toList();
 });

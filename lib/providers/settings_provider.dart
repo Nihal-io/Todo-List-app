@@ -69,6 +69,21 @@ class SettingsNotifier extends AsyncNotifier<AppSettings> {
   Future<void> setShowSectionToggle(bool value) =>
       _persist(_current.copyWith(showSectionToggle: value));
 
+  Future<void> setShowGridAxisLabels(bool value) =>
+      _persist(_current.copyWith(showGridAxisLabels: value));
+
+  Future<void> setShowGridEvents(bool value) =>
+      _persist(_current.copyWith(showGridEvents: value));
+
+  Future<void> setShowGridOverdueHighlight(bool value) =>
+      _persist(_current.copyWith(showGridOverdueHighlight: value));
+
+  Future<void> setShowGridUrgencyBadges(bool value) =>
+      _persist(_current.copyWith(showGridUrgencyBadges: value));
+
+  Future<void> setGridSoonThreshold(GridSoonThresholdPref pref) =>
+      _persist(_current.copyWith(gridSoonThreshold: pref));
+
   Future<void> setQuadrantColor(MatrixQuadrant quadrant, Color color) {
     final next = Map<MatrixQuadrant, Color>.from(
       _current.quadrantColorOverrides,
@@ -82,6 +97,9 @@ class SettingsNotifier extends AsyncNotifier<AppSettings> {
     )..remove(quadrant);
     return _persist(_current.copyWith(quadrantColorOverrides: next));
   }
+
+  Future<void> setNotificationsEnabled(bool value) =>
+      _persist(_current.copyWith(notificationsEnabled: value));
 
   Future<void> resetAll() => _persist(AppSettings.defaults);
 }

@@ -1,13 +1,15 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/task.dart';
+import '../shared/date_utils.dart' as date_utils;
 import 'clock_provider.dart';
+import 'settings_provider.dart';
 import 'tasks_provider.dart';
 
 /// Sentinel score used when a task has no foreseeable next occurrence.
 /// Pushes such items to the bottom of their quadrant.
 const int _matrixNoOccurrenceScore = 1 << 30;
 
-DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+DateTime _dateOnly(DateTime d) => date_utils.dateOnly(d);
 
 /// True when an event's end date has passed relative to [today].
 ///
@@ -42,13 +44,12 @@ int matrixUrgencyScore(Task t, DateTime today) {
   return _dateOnly(d).difference(base).inDays;
 }
 
-/// Whether the task is currently open work that the matrix should display.
+/// Whether the task is currently open work that the grid view should display.
 ///
-/// The matrix only shows pending work — completed items vanish on the next
-/// panel revisit. Until then the screen layer keeps them visible via its
-/// frozen-id snapshot so completion is a deliberate stroke-through, not a
-/// disappearing trick under the user's finger.
-bool isVisibleInMatrix(Task t, DateTime today) {
+/// Completed items vanish on the next panel revisit. The screen layer keeps
+/// them visible via its frozen-id snapshot until then.
+bool isVisibleInGrid(Task t, DateTime today, {required bool includeEvents}) {
+  if (t.isEvent && !includeEvents) return false;
   final base = _dateOnly(today);
   if (t.isRecurring) {
     if (t.isCompletedOn(base)) return false;
@@ -63,20 +64,19 @@ bool isVisibleInMatrix(Task t, DateTime today) {
   return !t.completed;
 }
 
-/// Grouped, urgency-sorted view of open tasks for the matrix screen.
-///
-/// Watches both [tasksProvider] and [todayProvider] so the matrix
-/// recomputes when the data changes *and* when the day rolls over.
+/// Grouped, urgency-sorted view of open tasks for the grid view screen.
 final matrixItemsProvider = Provider<Map<MatrixQuadrant, List<Task>>>((ref) {
-  final tasks = ref.watch(tasksProvider);
+  final tasks = ref.watch(tasksListProvider);
   final today = ref.watch(todayProvider);
+  final settings = ref.watch(resolvedSettingsProvider);
+  final includeEvents = settings.showGridEvents;
 
   final grouped = <MatrixQuadrant, List<Task>>{
     for (final q in MatrixQuadrant.values) q: <Task>[],
   };
 
   for (final t in tasks) {
-    if (isVisibleInMatrix(t, today)) {
+    if (isVisibleInGrid(t, today, includeEvents: includeEvents)) {
       grouped[t.quadrant]!.add(t);
     }
   }
@@ -96,7 +96,26 @@ final matrixItemsProvider = Provider<Map<MatrixQuadrant, List<Task>>>((ref) {
   return grouped;
 });
 
-/// Bumped when the user returns to the Matrix tab from elsewhere. The
+/// Bumped when the user returns to the Grid View tab from elsewhere. The
 /// screen listens to this to drop its frozen snapshot, which purges
 /// recently-completed tasks from view and re-applies urgency sort.
 final matrixRevisitSignalProvider = StateProvider<int>((ref) => 0);
+
+/// Total open items across all quadrants.
+final gridOpenCountProvider = Provider<int>((ref) {
+  final items = ref.watch(matrixItemsProvider);
+  return items.values.fold(0, (sum, list) => sum + list.length);
+});
+
+/// Open items whose urgency score is negative (overdue / past start).
+final gridOverdueCountProvider = Provider<int>((ref) {
+  final items = ref.watch(matrixItemsProvider);
+  final today = ref.watch(todayProvider);
+  var count = 0;
+  for (final list in items.values) {
+    for (final t in list) {
+      if (matrixUrgencyScore(t, today) < 0) count++;
+    }
+  }
+  return count;
+});

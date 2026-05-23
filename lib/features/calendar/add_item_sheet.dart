@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
+
+import '../../models/sub_task.dart';
 import '../../models/task.dart';
 import '../../providers/selected_day_provider.dart';
 import '../../providers/settings_provider.dart';
@@ -24,10 +26,6 @@ void showAddItemSheet(
   );
 }
 
-// ---------------------------------------------------------------------------
-
-// Weekday chip order: Sun Mon Tue Wed Thu Fri Sat
-// DateTime.weekday: 1=Mon ... 7=Sun → store as those ints
 const List<int> _weekdayOrder = [
   DateTime.sunday,
   DateTime.monday,
@@ -51,6 +49,9 @@ class _AddItemSheet extends ConsumerStatefulWidget {
 
 class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
   final _titleController = TextEditingController();
+  final _notesController = TextEditingController();
+  final _newSubtaskController = TextEditingController();
+  final FocusNode _newSubtaskFocus = FocusNode();
 
   TaskKind _kind = TaskKind.task;
   late DateTime _startDate;
@@ -62,17 +63,26 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
   bool _repeatForever = true;
   DateTime? _repeatUntil;
 
+  TimeOfDay? _startTime;
+  TimeOfDay? _endTime;
+
+  final List<SubTask> _subtasks = <SubTask>[];
+
   @override
   void initState() {
     super.initState();
     final task = widget.taskToEdit;
     if (task != null) {
       _titleController.text = task.title;
+      _notesController.text = task.notes;
       _kind = task.kind;
       _startDate = task.startDate;
       _endDate = task.endDate;
       _quadrant = task.quadrant;
       _priority = task.priority;
+      _startTime = task.startTime?.toTimeOfDay();
+      _endTime = task.endTime?.toTimeOfDay();
+      _subtasks.addAll(task.subtasks);
       if (task.isRecurring) {
         _weekdays.addAll(task.recurrence!.weekdays);
         _repeatUntil = task.recurrence!.until;
@@ -87,6 +97,9 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
   @override
   void dispose() {
     _titleController.dispose();
+    _notesController.dispose();
+    _newSubtaskController.dispose();
+    _newSubtaskFocus.dispose();
     super.dispose();
   }
 
@@ -105,7 +118,7 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
       context: context,
       initialDate: _startDate,
       firstDate: DateTime(2020),
-      lastDate: DateTime(2030),
+      lastDate: DateTime(DateTime.now().year + 10),
     );
     if (picked != null) {
       setState(() {
@@ -126,7 +139,7 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
       context: context,
       initialDate: _endDate ?? _startDate.add(const Duration(days: 1)),
       firstDate: _startDate,
-      lastDate: DateTime(2030),
+      lastDate: DateTime(DateTime.now().year + 10),
     );
     if (picked != null) setState(() => _endDate = picked);
   }
@@ -136,7 +149,7 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
       context: context,
       initialDate: _repeatUntil ?? _startDate.add(const Duration(days: 30)),
       firstDate: _startDate,
-      lastDate: DateTime(2030),
+      lastDate: DateTime(DateTime.now().year + 10),
     );
     if (picked != null) {
       setState(() {
@@ -144,6 +157,38 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
         _repeatForever = false;
       });
     }
+  }
+
+  Future<void> _pickStartTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _startTime ?? const TimeOfDay(hour: 9, minute: 0),
+    );
+    if (picked != null) {
+      setState(() {
+        _startTime = picked;
+        if (_endTime != null &&
+            (_endTime!.hour < picked.hour ||
+                (_endTime!.hour == picked.hour &&
+                    _endTime!.minute <= picked.minute))) {
+          _endTime = null;
+        }
+      });
+    }
+  }
+
+  Future<void> _pickEndTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _endTime ??
+          (_startTime == null
+              ? const TimeOfDay(hour: 10, minute: 0)
+              : TimeOfDay(
+                  hour: (_startTime!.hour + 1) % 24,
+                  minute: _startTime!.minute,
+                )),
+    );
+    if (picked != null) setState(() => _endTime = picked);
   }
 
   void _clearEndDate() => setState(() => _endDate = null);
@@ -156,10 +201,45 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
         }
       });
 
+  void _addSubtask() {
+    final t = _newSubtaskController.text.trim();
+    if (t.isEmpty) return;
+    setState(() {
+      _subtasks.add(SubTask(id: _uuid.v4(), title: t));
+      _newSubtaskController.clear();
+    });
+    _newSubtaskFocus.requestFocus();
+  }
+
+  void _toggleSubtask(int index) {
+    setState(() {
+      final s = _subtasks[index];
+      _subtasks[index] = s.copyWith(completed: !s.completed);
+    });
+  }
+
+  void _removeSubtask(int index) =>
+      setState(() => _subtasks.removeAt(index));
+
+  void _editSubtaskTitle(int index, String value) {
+    setState(() {
+      _subtasks[index] = _subtasks[index].copyWith(title: value);
+    });
+  }
+
   void _submit() {
     if (!_canSubmit) return;
     final title = _titleController.text.trim();
+    final notes = _notesController.text.trim();
     final id = widget.taskToEdit?.id ?? _uuid.v4();
+
+    final startTaskTime =
+        _startTime == null ? null : TaskTime.fromTimeOfDay(_startTime!);
+    final endTaskTime =
+        _endTime == null ? null : TaskTime.fromTimeOfDay(_endTime!);
+
+    final cleanedSubtasks =
+        _subtasks.where((s) => s.title.trim().isNotEmpty).toList();
 
     Task task;
     if (_kind == TaskKind.event) {
@@ -171,6 +251,11 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
         kind: TaskKind.event,
         quadrant: _quadrant,
         completed: widget.taskToEdit?.completed ?? false,
+        notes: notes,
+        subtasks: cleanedSubtasks,
+        startTime: startTaskTime,
+        endTime: endTaskTime,
+        sortIndex: widget.taskToEdit?.sortIndex,
       );
     } else if (_isRecurring) {
       task = Task(
@@ -187,6 +272,10 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
         completedDates: widget.taskToEdit?.isRecurring == true
             ? widget.taskToEdit!.completedDates
             : null,
+        notes: notes,
+        subtasks: cleanedSubtasks,
+        startTime: startTaskTime,
+        sortIndex: widget.taskToEdit?.sortIndex,
       );
     } else {
       task = Task(
@@ -200,11 +289,15 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
         completed: widget.taskToEdit?.isRecurring != true
             ? (widget.taskToEdit?.completed ?? false)
             : false,
+        notes: notes,
+        subtasks: cleanedSubtasks,
+        startTime: startTaskTime,
+        sortIndex: widget.taskToEdit?.sortIndex,
       );
     }
 
     if (_isEditing) {
-      ref.read(tasksProvider.notifier).update(task);
+      ref.read(tasksProvider.notifier).updateTask(task);
     } else {
       ref.read(tasksProvider.notifier).add(task);
     }
@@ -264,6 +357,9 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
       padding:
           EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.92,
+        ),
         decoration: BoxDecoration(
           color: AppSemanticColors.tileBackground(context),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -352,6 +448,22 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
                 ),
               ),
               const SizedBox(height: 16),
+              const _SectionLabel('Notes'),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _notesController,
+                maxLines: 3,
+                minLines: 2,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(
+                  hintText: 'Add a description or context (optional)',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 16),
               const _SectionLabel('Quadrant'),
               const SizedBox(height: 8),
               _QuadrantPicker(
@@ -394,6 +506,54 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
                         ),
                 ),
               ],
+              const SizedBox(height: 12),
+              const _SectionLabel('Time of day (optional)'),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: _PickerRow(
+                      icon: Icons.schedule_outlined,
+                      label: _startTime == null
+                          ? 'Start time'
+                          : _startTime!.format(context),
+                      primary: primary,
+                      onTap: _pickStartTime,
+                      trailing: _startTime == null
+                          ? null
+                          : IconButton(
+                              icon: const Icon(Icons.close, size: 18),
+                              color: AppSemanticColors.textFaint(context),
+                              onPressed: () =>
+                                  setState(() => _startTime = null),
+                              tooltip: 'Clear',
+                            ),
+                    ),
+                  ),
+                  if (_kind == TaskKind.event) ...[
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _PickerRow(
+                        icon: Icons.timer_off_outlined,
+                        label: _endTime == null
+                            ? 'End time'
+                            : _endTime!.format(context),
+                        primary: primary,
+                        onTap: _pickEndTime,
+                        trailing: _endTime == null
+                            ? null
+                            : IconButton(
+                                icon: const Icon(Icons.close, size: 18),
+                                color: AppSemanticColors.textFaint(context),
+                                onPressed: () =>
+                                    setState(() => _endTime = null),
+                                tooltip: 'Clear',
+                              ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
               if (isTask) ...[
                 const SizedBox(height: 16),
                 const _SectionLabel('Repeat'),
@@ -429,6 +589,46 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
                   ),
                 ],
               ],
+              const SizedBox(height: 16),
+              const _SectionLabel('Subtasks'),
+              const SizedBox(height: 8),
+              _SubtaskEditor(
+                subtasks: _subtasks,
+                onToggle: _toggleSubtask,
+                onRemove: _removeSubtask,
+                onEdit: _editSubtaskTitle,
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _newSubtaskController,
+                      focusNode: _newSubtaskFocus,
+                      textCapitalization: TextCapitalization.sentences,
+                      onSubmitted: (_) => _addSubtask(),
+                      decoration: InputDecoration(
+                        hintText: 'Add a subtask',
+                        prefixIcon: Icon(
+                          Icons.add_task,
+                          size: 18,
+                          color: AppSemanticColors.textFaint(context),
+                        ),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton.filledTonal(
+                    onPressed: _addSubtask,
+                    icon: const Icon(Icons.add),
+                    tooltip: 'Add subtask',
+                  ),
+                ],
+              ),
               const SizedBox(height: 20),
               ElevatedButton(
                 onPressed: _canSubmit ? _submit : null,
@@ -730,6 +930,154 @@ class _ChoiceChip extends StatelessWidget {
             color: selected ? Colors.white : color,
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SubtaskEditor extends StatelessWidget {
+  const _SubtaskEditor({
+    required this.subtasks,
+    required this.onToggle,
+    required this.onRemove,
+    required this.onEdit,
+  });
+
+  final List<SubTask> subtasks;
+  final ValueChanged<int> onToggle;
+  final ValueChanged<int> onRemove;
+  final void Function(int index, String value) onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    if (subtasks.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Text(
+          'No subtasks yet — add steps below to break this task down.',
+          style: TextStyle(
+            fontSize: 12,
+            color: AppSemanticColors.textFaint(context),
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        for (var i = 0; i < subtasks.length; i++)
+          _SubtaskRow(
+            key: ValueKey(subtasks[i].id),
+            subtask: subtasks[i],
+            onToggle: () => onToggle(i),
+            onRemove: () => onRemove(i),
+            onEdit: (v) => onEdit(i, v),
+          ),
+      ],
+    );
+  }
+}
+
+class _SubtaskRow extends StatefulWidget {
+  const _SubtaskRow({
+    super.key,
+    required this.subtask,
+    required this.onToggle,
+    required this.onRemove,
+    required this.onEdit,
+  });
+
+  final SubTask subtask;
+  final VoidCallback onToggle;
+  final VoidCallback onRemove;
+  final ValueChanged<String> onEdit;
+
+  @override
+  State<_SubtaskRow> createState() => _SubtaskRowState();
+}
+
+class _SubtaskRowState extends State<_SubtaskRow> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.subtask.title);
+
+  @override
+  void didUpdateWidget(covariant _SubtaskRow old) {
+    super.didUpdateWidget(old);
+    if (old.subtask.title != widget.subtask.title &&
+        _controller.text != widget.subtask.title) {
+      _controller.text = widget.subtask.title;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final done = widget.subtask.completed;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: widget.onToggle,
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.all(6),
+              child: Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: done
+                        ? AppSemanticColors.successGreen
+                        : AppSemanticColors.subtleBorder(context),
+                    width: 2,
+                  ),
+                  color: done
+                      ? AppSemanticColors.successGreen
+                      : Colors.transparent,
+                ),
+                child: done
+                    ? const Icon(Icons.check, size: 13, color: Colors.white)
+                    : null,
+              ),
+            ),
+          ),
+          Expanded(
+            child: TextField(
+              controller: _controller,
+              onChanged: widget.onEdit,
+              style: TextStyle(
+                fontSize: 14,
+                color: done
+                    ? AppSemanticColors.textFaint(context)
+                    : AppSemanticColors.textStrong(context),
+                decoration:
+                    done ? TextDecoration.lineThrough : TextDecoration.none,
+              ),
+              decoration: const InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.symmetric(vertical: 6),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.close,
+                size: 16, color: AppSemanticColors.textFaint(context)),
+            tooltip: 'Remove',
+            onPressed: widget.onRemove,
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          ),
+        ],
       ),
     );
   }

@@ -7,6 +7,7 @@ import '../../providers/selected_day_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/tasks_provider.dart';
 import '../../shared/date_format.dart';
+import '../../shared/widgets/task_detail_sheet.dart';
 import '../../theme/app_theme.dart';
 import 'add_item_sheet.dart';
 
@@ -31,7 +32,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     final primary = theme.colorScheme.primary;
 
     final selectedDay = ref.watch(selectedCalendarDayProvider);
-    final allTasks = ref.watch(tasksProvider);
+    final allTasks = ref.watch(tasksListProvider);
     final settings = ref.watch(resolvedSettingsProvider);
     final quadrantColors = ref.watch(quadrantColorsProvider);
 
@@ -76,12 +77,9 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                     DateTime(selected.year, selected.month, selected.day);
                 setState(() => _focusedDay = focused);
               },
-              onPageChanged: (focused) =>
-                  setState(() => _focusedDay = focused),
+              onPageChanged: (focused) => setState(() => _focusedDay = focused),
               calendarFormat: CalendarFormat.month,
-              availableCalendarFormats: const {
-                CalendarFormat.month: 'Month'
-              },
+              availableCalendarFormats: const {CalendarFormat.month: 'Month'},
               startingDayOfWeek: settings.firstDayOfWeek.startingDayOfWeek,
               calendarStyle: const CalendarStyle(
                 outsideDaysVisible: false,
@@ -203,9 +201,8 @@ class _DayCell extends StatelessWidget {
                 '${day.day}',
                 style: TextStyle(
                   fontSize: 13,
-                  fontWeight: isSelected || isToday
-                      ? FontWeight.w700
-                      : FontWeight.w400,
+                  fontWeight:
+                      isSelected || isToday ? FontWeight.w700 : FontWeight.w400,
                   color: isSelected
                       ? Colors.white
                       : isToday
@@ -338,8 +335,13 @@ class _DayHeader extends StatelessWidget {
     if (isSameDay(selectedDay, today)) return 'Today';
     if (isSameDay(selectedDay, tomorrow)) return 'Tomorrow';
     const weekdays = [
-      'Monday', 'Tuesday', 'Wednesday', 'Thursday',
-      'Friday', 'Saturday', 'Sunday',
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
     ];
     return '${weekdays[selectedDay.weekday - 1]}, '
         '${formatDate(selectedDay, dateFormat)}';
@@ -409,8 +411,7 @@ class _DayPanel extends ConsumerWidget {
       return 2;
     }
 
-    final sorted = [...tasks]
-      ..sort((a, b) {
+    final sorted = [...tasks]..sort((a, b) {
         final r = rank(a).compareTo(rank(b));
         if (r != 0) return r;
         return b.priority.index.compareTo(a.priority.index);
@@ -420,19 +421,23 @@ class _DayPanel extends ConsumerWidget {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
       itemCount: sorted.length,
       itemBuilder: (_, i) {
-          final t = sorted[i];
-          return _TaskTile(
-            task: t,
-            selectedDay: selectedDay,
-            density: density,
-            dateFormat: dateFormat,
-            accentColor: colorFor(t),
-            onToggle: () => ref
-                .read(tasksProvider.notifier)
-                .toggleForDay(t.id, selectedDay),
-            onEdit: () => showAddItemSheet(context, taskToEdit: t),
-          );
-        },
+        final t = sorted[i];
+        return _TaskTile(
+          task: t,
+          selectedDay: selectedDay,
+          density: density,
+          dateFormat: dateFormat,
+          accentColor: colorFor(t),
+          onToggle: () =>
+              ref.read(tasksProvider.notifier).toggleForDay(t.id, selectedDay),
+          onOpen: () => showTaskDetailSheet(
+            context,
+            taskId: t.id,
+            referenceDay: selectedDay,
+          ),
+          onLongPress: () => showAddItemSheet(context, taskToEdit: t),
+        );
+      },
     );
   }
 }
@@ -449,7 +454,8 @@ class _TaskTile extends StatelessWidget {
     required this.density,
     required this.dateFormat,
     required this.accentColor,
-    required this.onEdit,
+    required this.onOpen,
+    required this.onLongPress,
   });
 
   final Task task;
@@ -458,7 +464,8 @@ class _TaskTile extends StatelessWidget {
   final DensityPref density;
   final DateFormatPref dateFormat;
   final Color accentColor;
-  final VoidCallback onEdit;
+  final VoidCallback onOpen;
+  final VoidCallback onLongPress;
 
   static const _weekdayShort = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
@@ -475,8 +482,7 @@ class _TaskTile extends StatelessWidget {
 
   String? _subtitle() {
     if (task.isMultiDay) {
-      final range =
-          formatDateRange(task.startDate, task.endDate!, dateFormat);
+      final range = formatDateRange(task.startDate, task.endDate!, dateFormat);
       if (task.isEvent && task.hasAutoCompleted) return '$range  ·  Ended';
       return range;
     }
@@ -515,89 +521,127 @@ class _TaskTile extends StatelessWidget {
           ),
         ],
       ),
-      child: InkWell(
-        onTap: onToggle,
-        onLongPress: onEdit,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Container(
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            GestureDetector(
+              onTap: onToggle,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isDone
+                          ? AppSemanticColors.successGreen
+                          : AppSemanticColors.subtleBorder(context),
+                      width: 2,
+                    ),
                     color: isDone
                         ? AppSemanticColors.successGreen
-                        : AppSemanticColors.subtleBorder(context),
-                    width: 2,
+                        : Colors.transparent,
                   ),
-                  color: isDone
-                      ? AppSemanticColors.successGreen
-                      : Colors.transparent,
+                  child: isDone
+                      ? const Icon(Icons.check, size: 13, color: Colors.white)
+                      : null,
                 ),
-                child: isDone
-                    ? const Icon(Icons.check, size: 13, color: Colors.white)
-                    : null,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      task.title,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: isDone
-                            ? AppSemanticColors.textFaint(context)
-                            : AppSemanticColors.textStrong(context),
-                        decoration: isDone
-                            ? TextDecoration.lineThrough
-                            : TextDecoration.none,
-                        decorationColor: AppSemanticColors.textFaint(context),
-                      ),
-                    ),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 2),
+            ),
+            Expanded(
+              child: InkWell(
+                onTap: onOpen,
+                onLongPress: onLongPress,
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        subtitle,
+                        task.title,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 12,
-                          color: AppSemanticColors.textFaint(context),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: isDone
+                              ? AppSemanticColors.textFaint(context)
+                              : AppSemanticColors.textStrong(context),
+                          decoration: isDone
+                              ? TextDecoration.lineThrough
+                              : TextDecoration.none,
+                          decorationColor: AppSemanticColors.textFaint(context),
+                        ),
+                      ),
+                      if (subtitle != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppSemanticColors.textFaint(context),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (task.hasSubtasks) ...[
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check_box_outlined,
+                          size: 11, color: accentColor),
+                      const SizedBox(width: 3),
+                      Text(
+                        '${task.completedSubtaskCount}/${task.subtasks.length}',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: accentColor,
                         ),
                       ),
                     ],
-                  ],
+                  ),
                 ),
               ),
-              const SizedBox(width: 8),
-              if (!task.isEvent)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: _priorityColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    task.priority.name.toUpperCase(),
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: _priorityColor,
-                      letterSpacing: 0.4,
-                    ),
+            ],
+            if (!task.isEvent) ...[
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: _priorityColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  task.priority.name.toUpperCase(),
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: _priorityColor,
+                    letterSpacing: 0.4,
                   ),
                 ),
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );

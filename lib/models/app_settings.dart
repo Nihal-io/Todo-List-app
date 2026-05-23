@@ -12,6 +12,33 @@ enum FirstDayOfWeekPref { sunday, monday }
 
 enum DateFormatPref { monthDay, dayMonth, slash }
 
+/// How many days ahead count as "soon" urgency on the grid view badges.
+enum GridSoonThresholdPref { oneDay, threeDays, sevenDays }
+
+extension GridSoonThresholdPrefX on GridSoonThresholdPref {
+  int get days {
+    switch (this) {
+      case GridSoonThresholdPref.oneDay:
+        return 1;
+      case GridSoonThresholdPref.threeDays:
+        return 3;
+      case GridSoonThresholdPref.sevenDays:
+        return 7;
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case GridSoonThresholdPref.oneDay:
+        return '1 day';
+      case GridSoonThresholdPref.threeDays:
+        return '3 days';
+      case GridSoonThresholdPref.sevenDays:
+        return '7 days';
+    }
+  }
+}
+
 extension TextScalePrefX on TextScalePref {
   double get scaleFactor {
     switch (this) {
@@ -119,7 +146,13 @@ class AppSettings {
     this.showProgressCard = true,
     this.showOverduePanel = true,
     this.showSectionToggle = true,
+    this.showGridAxisLabels = true,
+    this.showGridEvents = true,
+    this.showGridOverdueHighlight = true,
+    this.showGridUrgencyBadges = true,
+    this.gridSoonThreshold = GridSoonThresholdPref.threeDays,
     this.quadrantColorOverrides = const <MatrixQuadrant, Color>{},
+    this.notificationsEnabled = false,
   });
 
   final ThemeMode themeMode;
@@ -133,9 +166,18 @@ class AppSettings {
   final bool showOverduePanel;
   final bool showSectionToggle;
 
+  final bool showGridAxisLabels;
+  final bool showGridEvents;
+  final bool showGridOverdueHighlight;
+  final bool showGridUrgencyBadges;
+  final GridSoonThresholdPref gridSoonThreshold;
+
   /// Per-quadrant color overrides. Missing entries fall back to the
   /// `MatrixQuadrant.color` default.
   final Map<MatrixQuadrant, Color> quadrantColorOverrides;
+
+  /// Whether local notifications are scheduled for upcoming tasks/events.
+  final bool notificationsEnabled;
 
   static const AppSettings defaults = AppSettings();
 
@@ -149,7 +191,13 @@ class AppSettings {
     bool? showProgressCard,
     bool? showOverduePanel,
     bool? showSectionToggle,
+    bool? showGridAxisLabels,
+    bool? showGridEvents,
+    bool? showGridOverdueHighlight,
+    bool? showGridUrgencyBadges,
+    GridSoonThresholdPref? gridSoonThreshold,
     Map<MatrixQuadrant, Color>? quadrantColorOverrides,
+    bool? notificationsEnabled,
   }) {
     return AppSettings(
       themeMode: themeMode ?? this.themeMode,
@@ -161,8 +209,16 @@ class AppSettings {
       showProgressCard: showProgressCard ?? this.showProgressCard,
       showOverduePanel: showOverduePanel ?? this.showOverduePanel,
       showSectionToggle: showSectionToggle ?? this.showSectionToggle,
+      showGridAxisLabels: showGridAxisLabels ?? this.showGridAxisLabels,
+      showGridEvents: showGridEvents ?? this.showGridEvents,
+      showGridOverdueHighlight:
+          showGridOverdueHighlight ?? this.showGridOverdueHighlight,
+      showGridUrgencyBadges:
+          showGridUrgencyBadges ?? this.showGridUrgencyBadges,
+      gridSoonThreshold: gridSoonThreshold ?? this.gridSoonThreshold,
       quadrantColorOverrides:
           quadrantColorOverrides ?? this.quadrantColorOverrides,
+      notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
     );
   }
 
@@ -176,6 +232,12 @@ class AppSettings {
         'showProgressCard': showProgressCard,
         'showOverduePanel': showOverduePanel,
         'showSectionToggle': showSectionToggle,
+        'showGridAxisLabels': showGridAxisLabels,
+        'showGridEvents': showGridEvents,
+        'showGridOverdueHighlight': showGridOverdueHighlight,
+        'showGridUrgencyBadges': showGridUrgencyBadges,
+        'gridSoonThreshold': gridSoonThreshold.name,
+        'notificationsEnabled': notificationsEnabled,
         'quadrantColorOverrides': {
           for (final e in quadrantColorOverrides.entries)
             e.key.name: _colorToHex(e.value),
@@ -200,9 +262,20 @@ class AppSettings {
       showProgressCard: json['showProgressCard'] as bool? ?? true,
       showOverduePanel: json['showOverduePanel'] as bool? ?? true,
       showSectionToggle: json['showSectionToggle'] as bool? ?? true,
+      showGridAxisLabels: json['showGridAxisLabels'] as bool? ?? true,
+      showGridEvents: json['showGridEvents'] as bool? ?? true,
+      showGridOverdueHighlight:
+          json['showGridOverdueHighlight'] as bool? ?? true,
+      showGridUrgencyBadges: json['showGridUrgencyBadges'] as bool? ?? true,
+      gridSoonThreshold: _enumByName(
+            GridSoonThresholdPref.values,
+            json['gridSoonThreshold'],
+          ) ??
+          GridSoonThresholdPref.threeDays,
       quadrantColorOverrides: _decodeQuadrantOverrides(
         json['quadrantColorOverrides'],
       ),
+      notificationsEnabled: json['notificationsEnabled'] as bool? ?? false,
     );
   }
 }

@@ -76,7 +76,7 @@ class ShellScaffold extends ConsumerWidget {
             _NavItem(
               icon: Icons.dashboard_outlined,
               activeIcon: Icons.dashboard,
-              label: 'Matrix',
+              label: 'Grid View',
               selected: currentIndex == 1,
               onTap: () => _onTap(1, ref),
               color: theme.colorScheme.primary,

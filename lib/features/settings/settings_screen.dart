@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/app_settings.dart';
 import '../../models/task.dart';
 import '../../providers/settings_provider.dart';
+import '../../providers/tasks_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/color_palettes.dart';
 
@@ -114,7 +115,55 @@ class SettingsScreen extends ConsumerWidget {
             onChanged: notifier.setDateFormat,
           ),
           const SizedBox(height: 8),
-          const _SectionHeader('Matrix colors'),
+          const _SectionHeader('Grid view'),
+          const _GridViewInfoCard(),
+          _SwitchTile(
+            title: 'Axis labels',
+            subtitle: 'Show Urgent / Important guides around the grid',
+            value: settings.showGridAxisLabels,
+            onChanged: notifier.setShowGridAxisLabels,
+          ),
+          _SwitchTile(
+            title: 'Include events',
+            subtitle: 'Show calendar events in their assigned quadrant',
+            value: settings.showGridEvents,
+            onChanged: notifier.setShowGridEvents,
+          ),
+          _SwitchTile(
+            title: 'Overdue highlight',
+            subtitle: 'Red tint and OVERDUE tag on past-deadline items',
+            value: settings.showGridOverdueHighlight,
+            onChanged: notifier.setShowGridOverdueHighlight,
+          ),
+          _SwitchTile(
+            title: 'Urgency badges',
+            subtitle: 'Date and urgency pills on each grid tile',
+            value: settings.showGridUrgencyBadges,
+            onChanged: notifier.setShowGridUrgencyBadges,
+          ),
+          _SettingTile(
+            title: 'Soon threshold',
+            subtitle:
+                'Items within ${settings.gridSoonThreshold.label} show as soon',
+            child: _SegmentedEnumPicker<GridSoonThresholdPref>(
+              values: GridSoonThresholdPref.values,
+              selected: settings.gridSoonThreshold,
+              labelFor: (v) => v.label,
+              onChanged: notifier.setGridSoonThreshold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+            child: Text(
+              'Quadrant colors',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppSemanticColors.textMuted(context),
+              ),
+            ),
+          ),
           for (final q in MatrixQuadrant.values)
             _QuadrantColorTile(
               quadrant: q,
@@ -123,6 +172,22 @@ class SettingsScreen extends ConsumerWidget {
               onPick: (color) => notifier.setQuadrantColor(q, color),
               onReset: () => notifier.resetQuadrantColor(q),
             ),
+          const SizedBox(height: 8),
+          const _SectionHeader('Notifications'),
+          _SwitchTile(
+            title: 'Local reminders',
+            subtitle: settings.notificationsEnabled
+                ? 'Notifies you when a task or event starts'
+                : 'Off — no reminders will be sent',
+            value: settings.notificationsEnabled,
+            onChanged: (v) async {
+              await notifier.setNotificationsEnabled(v);
+              if (v) {
+                final service = ref.read(notificationServiceProvider);
+                await service.requestPermission();
+              }
+            },
+          ),
           const SizedBox(height: 16),
           const _SectionHeader('Reset'),
           _ResetAllTile(onReset: notifier.resetAll),
@@ -490,6 +555,76 @@ class _RadioRow<T> extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
+// Grid view info card
+// ---------------------------------------------------------------------------
+
+class _GridViewInfoCard extends StatelessWidget {
+  const _GridViewInfoCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            primary.withValues(alpha: 0.08),
+            primary.withValues(alpha: 0.03),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: primary.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(Icons.grid_view_rounded, size: 22, color: primary),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Eisenhower grid',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppSemanticColors.textStrong(context),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Tasks auto-sort by urgency within each quadrant. '
+                  'Tap a title to edit; tap the checkbox to complete. '
+                  'Completed items stay crossed off until you leave and '
+                  'return to Grid View.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.4,
+                    color: AppSemanticColors.textMuted(context),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Matrix quadrant color picker
 // ---------------------------------------------------------------------------
 
@@ -731,7 +866,7 @@ class _ResetAllTile extends StatelessWidget {
               title: const Text('Reset settings?'),
               content: const Text(
                 'This will restore every appearance, home, calendar, and '
-                'matrix color setting to its default value. Your tasks will '
+                'grid view setting to its default value. Your tasks will '
                 'not be affected.',
               ),
               actions: [

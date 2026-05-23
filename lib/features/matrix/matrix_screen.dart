@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../models/app_settings.dart';
 import '../../models/task.dart';
 import '../../providers/clock_provider.dart';
 import '../../providers/matrix_provider.dart';
+import '../../providers/search_filter_provider.dart';
+import '../../providers/settings_provider.dart';
 import '../../providers/tasks_provider.dart';
+import '../../shared/widgets/task_detail_sheet.dart';
+import '../../shared/widgets/task_search_bar.dart';
 import '../../theme/app_theme.dart';
+import '../calendar/add_item_sheet.dart';
 
 class MatrixScreen extends ConsumerStatefulWidget {
   const MatrixScreen({super.key});
@@ -28,10 +34,6 @@ class _MatrixScreenState extends ConsumerState<MatrixScreen> {
     setState(_clearFrozen);
   }
 
-  /// Display list for a quadrant. If a snapshot exists, walk its ids in
-  /// order (looking each task up in [byId] so completion state, edits,
-  /// etc. show through). Append any tasks newly in [liveOpen] that
-  /// weren't in the snapshot so additions are visible immediately.
   List<Task> _displayQuadrant(
     MatrixQuadrant q,
     Map<MatrixQuadrant, List<Task>> liveOpen,
@@ -76,35 +78,79 @@ class _MatrixScreenState extends ConsumerState<MatrixScreen> {
       setState(_clearFrozen);
     });
 
+    final settings = ref.watch(resolvedSettingsProvider);
+    final quadrantColors = ref.watch(quadrantColorsProvider);
     final today = ref.watch(todayProvider);
     final liveOpen = ref.watch(matrixItemsProvider);
-    final allTasks = ref.watch(tasksProvider);
+    final openCount = ref.watch(gridOpenCountProvider);
+    final overdueCount = ref.watch(gridOverdueCountProvider);
+    final allTasks = ref.watch(tasksListProvider);
     final byId = {for (final t in allTasks) t.id: t};
+    final density = settings.density.paddingMultiplier;
+    final filter = ref.watch(taskFilterProvider);
+    final searchOpen = ref.watch(searchBarOpenProvider);
 
     Widget cell(MatrixQuadrant q) {
-      final tasks = _displayQuadrant(q, liveOpen, byId);
+      var tasks = _displayQuadrant(q, liveOpen, byId);
+      if (filter.isActive) tasks = filter.apply(tasks, today);
+      final color = quadrantColors[q] ?? q.color;
       return _QuadrantSection(
         quadrant: q,
+        color: color,
         tasks: tasks,
         today: today,
+        density: density,
+        showOverdueHighlight: settings.showGridOverdueHighlight,
+        showUrgencyBadges: settings.showGridUrgencyBadges,
+        soonThresholdDays: settings.gridSoonThreshold.days,
         onToggle: (task) => _onTileToggle(q, task, tasks, today),
+        onOpen: (task) => showTaskDetailSheet(
+          context,
+          taskId: task.id,
+          referenceDay: today,
+        ),
+        onLongPress: (task) => showAddItemSheet(context, taskToEdit: task),
       );
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Matrix')),
+      appBar: AppBar(
+        title: const Text('Grid View'),
+        actions: [
+          IconButton(
+            tooltip: 'Search',
+            icon: Icon(filter.isActive || searchOpen
+                ? Icons.filter_alt
+                : Icons.search),
+            onPressed: () =>
+                ref.read(searchBarOpenProvider.notifier).state = !searchOpen,
+          ),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(44),
+          child: _GridSummaryBar(
+            openCount: openCount,
+            overdueCount: overdueCount,
+          ),
+        ),
+      ),
       body: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 100),
+        padding: EdgeInsets.fromLTRB(12, 4, 12, 100 * density.clamp(0.8, 1.0)),
         child: Column(
           children: [
-            const _TopAxisLabels(),
-            const SizedBox(height: 6),
+            if (searchOpen) const TaskSearchBar(),
+            if (settings.showGridAxisLabels) ...[
+              const _TopAxisLabels(),
+              SizedBox(height: 6 * density),
+            ],
             Expanded(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const _SideAxisLabels(),
-                  const SizedBox(width: 6),
+                  if (settings.showGridAxisLabels) ...[
+                    const _SideAxisLabels(),
+                    SizedBox(width: 6 * density),
+                  ],
                   Expanded(
                     child: Column(
                       children: [
@@ -112,17 +158,17 @@ class _MatrixScreenState extends ConsumerState<MatrixScreen> {
                           child: Row(
                             children: [
                               Expanded(child: cell(MatrixQuadrant.schedule)),
-                              const SizedBox(width: 8),
+                              SizedBox(width: 8 * density),
                               Expanded(child: cell(MatrixQuadrant.doFirst)),
                             ],
                           ),
                         ),
-                        const SizedBox(height: 8),
+                        SizedBox(height: 8 * density),
                         Expanded(
                           child: Row(
                             children: [
                               Expanded(child: cell(MatrixQuadrant.eliminate)),
-                              const SizedBox(width: 8),
+                              SizedBox(width: 8 * density),
                               Expanded(child: cell(MatrixQuadrant.delegate)),
                             ],
                           ),
@@ -135,6 +181,81 @@ class _MatrixScreenState extends ConsumerState<MatrixScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Summary bar
+// ---------------------------------------------------------------------------
+
+class _GridSummaryBar extends StatelessWidget {
+  const _GridSummaryBar({
+    required this.openCount,
+    required this.overdueCount,
+  });
+
+  final int openCount;
+  final int overdueCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+      child: Row(
+        children: [
+          Icon(Icons.grid_view_rounded, size: 16, color: primary),
+          const SizedBox(width: 8),
+          Text(
+            openCount == 0
+                ? 'No open items'
+                : '$openCount open ${openCount == 1 ? 'item' : 'items'}',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppSemanticColors.textMuted(context),
+            ),
+          ),
+          if (overdueCount > 0) ...[
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppSemanticColors.dangerRed.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    size: 14,
+                    color: AppSemanticColors.dangerRed,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '$overdueCount overdue',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: AppSemanticColors.dangerRed,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const Spacer(),
+          Text(
+            'Auto-sorted by urgency',
+            style: TextStyle(
+              fontSize: 11,
+              color: AppSemanticColors.textFaint(context),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -234,19 +355,32 @@ class _RotatedAxisText extends StatelessWidget {
 class _QuadrantSection extends StatelessWidget {
   const _QuadrantSection({
     required this.quadrant,
+    required this.color,
     required this.tasks,
     required this.today,
+    required this.density,
+    required this.showOverdueHighlight,
+    required this.showUrgencyBadges,
+    required this.soonThresholdDays,
     required this.onToggle,
+    required this.onOpen,
+    required this.onLongPress,
   });
 
   final MatrixQuadrant quadrant;
+  final Color color;
   final List<Task> tasks;
   final DateTime today;
+  final double density;
+  final bool showOverdueHighlight;
+  final bool showUrgencyBadges;
+  final int soonThresholdDays;
   final ValueChanged<Task> onToggle;
+  final ValueChanged<Task> onOpen;
+  final ValueChanged<Task> onLongPress;
 
   @override
   Widget build(BuildContext context) {
-    final color = quadrant.color;
     final surface = AppSemanticColors.tileBackground(context);
 
     return Container(
@@ -265,20 +399,33 @@ class _QuadrantSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _QuadrantHeader(quadrant: quadrant, count: tasks.length),
+          _QuadrantHeader(
+              quadrant: quadrant, color: color, count: tasks.length),
           Expanded(
             child: tasks.isEmpty
-                ? _EmptyQuadrant(quadrant: quadrant)
+                ? _EmptyQuadrant(quadrant: quadrant, color: color)
                 : ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                    padding: EdgeInsets.fromLTRB(
+                      8 * density,
+                      0,
+                      8 * density,
+                      8 * density,
+                    ),
                     itemCount: tasks.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 6),
+                    separatorBuilder: (_, __) => SizedBox(height: 6 * density),
                     itemBuilder: (context, i) {
                       final task = tasks[i];
-                      return _MatrixTaskTile(
+                      return _GridTaskTile(
                         task: task,
+                        accentColor: color,
                         today: today,
+                        density: density,
+                        showOverdueHighlight: showOverdueHighlight,
+                        showUrgencyBadges: showUrgencyBadges,
+                        soonThresholdDays: soonThresholdDays,
                         onToggle: () => onToggle(task),
+                        onOpen: () => onOpen(task),
+                        onLongPress: () => onLongPress(task),
                       );
                     },
                   ),
@@ -290,14 +437,18 @@ class _QuadrantSection extends StatelessWidget {
 }
 
 class _QuadrantHeader extends StatelessWidget {
-  const _QuadrantHeader({required this.quadrant, required this.count});
+  const _QuadrantHeader({
+    required this.quadrant,
+    required this.color,
+    required this.count,
+  });
 
   final MatrixQuadrant quadrant;
+  final Color color;
   final int count;
 
   @override
   Widget build(BuildContext context) {
-    final color = quadrant.color;
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 10, 8, 8),
       child: Row(
@@ -348,9 +499,10 @@ class _QuadrantHeader extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _EmptyQuadrant extends StatelessWidget {
-  const _EmptyQuadrant({required this.quadrant});
+  const _EmptyQuadrant({required this.quadrant, required this.color});
 
   final MatrixQuadrant quadrant;
+  final Color color;
 
   static const _prompts = {
     MatrixQuadrant.doFirst: 'No fires to put out',
@@ -368,7 +520,6 @@ class _EmptyQuadrant extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = quadrant.color;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -401,16 +552,30 @@ class _EmptyQuadrant extends StatelessWidget {
 // Tile
 // ---------------------------------------------------------------------------
 
-class _MatrixTaskTile extends StatelessWidget {
-  const _MatrixTaskTile({
+class _GridTaskTile extends StatelessWidget {
+  const _GridTaskTile({
     required this.task,
+    required this.accentColor,
     required this.today,
+    required this.density,
+    required this.showOverdueHighlight,
+    required this.showUrgencyBadges,
+    required this.soonThresholdDays,
     required this.onToggle,
+    required this.onOpen,
+    required this.onLongPress,
   });
 
   final Task task;
+  final Color accentColor;
   final DateTime today;
+  final double density;
+  final bool showOverdueHighlight;
+  final bool showUrgencyBadges;
+  final int soonThresholdDays;
   final VoidCallback onToggle;
+  final VoidCallback onOpen;
+  final VoidCallback onLongPress;
 
   bool get _isCompleted {
     if (task.isEvent) return false;
@@ -424,19 +589,23 @@ class _MatrixTaskTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final urgency = _UrgencyLabel.forTask(
-      task,
-      today,
-      isCompleted: _isCompleted,
-    );
+    final highlightOverdue = showOverdueHighlight && _isOverdue;
+    final urgency = showUrgencyBadges
+        ? _UrgencyLabel.forTask(
+            task,
+            today,
+            isCompleted: _isCompleted,
+            soonThresholdDays: soonThresholdDays,
+          )
+        : null;
 
-    final tileColor = _isOverdue
+    final tileColor = highlightOverdue
         ? AppSemanticColors.dangerRed.withValues(alpha: 0.08)
         : AppSemanticColors.subtleSurface(context);
 
-    final tileBorder = _isOverdue
+    final tileBorder = highlightOverdue
         ? Border(
-            left: BorderSide(color: task.color, width: 3),
+            left: BorderSide(color: accentColor, width: 3),
             top: BorderSide(
               color: AppSemanticColors.dangerRed.withValues(alpha: 0.35),
             ),
@@ -447,11 +616,14 @@ class _MatrixTaskTile extends StatelessWidget {
               color: AppSemanticColors.dangerRed.withValues(alpha: 0.35),
             ),
           )
-        : Border(left: BorderSide(color: task.color, width: 3));
+        : Border(left: BorderSide(color: accentColor, width: 3));
 
     final titleColor = _isCompleted
         ? AppSemanticColors.textFaint(context)
         : AppSemanticColors.textStrong(context);
+
+    final vPad = 7.0 * density;
+    final hPad = 8.0 * density;
 
     return Container(
       decoration: BoxDecoration(
@@ -459,39 +631,53 @@ class _MatrixTaskTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         border: tileBorder,
       ),
-      child: InkWell(
-        onTap: task.isEvent ? null : onToggle,
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 7, 8, 7),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              if (task.isEvent)
-                Icon(Icons.event, size: 16, color: task.color)
-              else
-                _TileCheckbox(completed: _isCompleted),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  task.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: titleColor,
-                    decoration: _isCompleted
-                        ? TextDecoration.lineThrough
-                        : TextDecoration.none,
-                    decorationColor: AppSemanticColors.textFaint(context),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(hPad, vPad, hPad, vPad),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            GestureDetector(
+              onTap: task.isEvent ? onOpen : onToggle,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: EdgeInsets.only(right: 8 * density),
+                child: task.isEvent
+                    ? Icon(Icons.event, size: 16 * density, color: accentColor)
+                    : _TileCheckbox(
+                        completed: _isCompleted,
+                        size: 16 * density,
+                      ),
+              ),
+            ),
+            Expanded(
+              child: InkWell(
+                onTap: onOpen,
+                onLongPress: onLongPress,
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 2 * density),
+                  child: Text(
+                    task.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.5 * density.clamp(0.85, 1.0),
+                      fontWeight: FontWeight.w600,
+                      color: titleColor,
+                      decoration: _isCompleted
+                          ? TextDecoration.lineThrough
+                          : TextDecoration.none,
+                      decorationColor: AppSemanticColors.textFaint(context),
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(width: 6),
+            ),
+            if (urgency != null) ...[
+              SizedBox(width: 6 * density),
               _UrgencyBadge(label: urgency),
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -499,27 +685,28 @@ class _MatrixTaskTile extends StatelessWidget {
 }
 
 class _TileCheckbox extends StatelessWidget {
-  const _TileCheckbox({required this.completed});
+  const _TileCheckbox({required this.completed, required this.size});
 
   final bool completed;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     if (completed) {
       return Container(
-        width: 16,
-        height: 16,
+        width: size,
+        height: size,
         decoration: const BoxDecoration(
           shape: BoxShape.circle,
           color: AppSemanticColors.successGreen,
         ),
         alignment: Alignment.center,
-        child: const Icon(Icons.check, size: 11, color: Colors.white),
+        child: Icon(Icons.check, size: size * 0.68, color: Colors.white),
       );
     }
     return Container(
-      width: 16,
-      height: 16,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         border: Border.all(
@@ -543,13 +730,11 @@ class _UrgencyLabel {
   final String text;
   final _UrgencyTier tier;
 
-  /// Computes the badge label and tier. Completed tasks always show a
-  /// neutral "Done" pill regardless of their date so the cross-off is the
-  /// dominant signal.
   static _UrgencyLabel forTask(
     Task t,
     DateTime today, {
     required bool isCompleted,
+    required int soonThresholdDays,
   }) {
     if (isCompleted) {
       return const _UrgencyLabel(text: 'DONE', tier: _UrgencyTier.done);
@@ -567,7 +752,7 @@ class _UrgencyLabel {
     if (score == 0) {
       return const _UrgencyLabel(text: 'Today', tier: _UrgencyTier.today);
     }
-    if (score <= 3) {
+    if (score <= soonThresholdDays) {
       return _UrgencyLabel(
         text: score == 1 ? 'Tomorrow' : '${score}d',
         tier: _UrgencyTier.soon,
@@ -580,8 +765,18 @@ class _UrgencyLabel {
   }
 
   static const _months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
 
   static String _shortDateForScore(DateTime today, int score) {
