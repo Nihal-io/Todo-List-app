@@ -1,18 +1,95 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/task.dart';
+import '../../providers/clock_provider.dart';
 import '../../providers/matrix_provider.dart';
 import '../../providers/tasks_provider.dart';
 import '../../theme/app_theme.dart';
 
-class MatrixScreen extends ConsumerWidget {
+class MatrixScreen extends ConsumerStatefulWidget {
   const MatrixScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final items = ref.watch(matrixItemsProvider);
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+  ConsumerState<MatrixScreen> createState() => _MatrixScreenState();
+}
+
+class _MatrixScreenState extends ConsumerState<MatrixScreen> {
+  /// Per-quadrant snapshot of displayed task ids. When set, the panel
+  /// renders in this fixed order — items don't reshuffle on completion
+  /// and recently-completed tasks remain visible (crossed off) until the
+  /// user revisits the tab and the snapshot is cleared.
+  final Map<MatrixQuadrant, List<String>> _frozen = {};
+
+  void _clearFrozen() => _frozen.clear();
+
+  @override
+  void reassemble() {
+    super.reassemble();
+    setState(_clearFrozen);
+  }
+
+  /// Display list for a quadrant. If a snapshot exists, walk its ids in
+  /// order (looking each task up in [byId] so completion state, edits,
+  /// etc. show through). Append any tasks newly in [liveOpen] that
+  /// weren't in the snapshot so additions are visible immediately.
+  List<Task> _displayQuadrant(
+    MatrixQuadrant q,
+    Map<MatrixQuadrant, List<Task>> liveOpen,
+    Map<String, Task> byId,
+  ) {
+    final frozen = _frozen[q];
+    if (frozen == null) {
+      return liveOpen[q] ?? const <Task>[];
+    }
+
+    final out = <Task>[];
+    final seen = <String>{};
+    for (final id in frozen) {
+      final t = byId[id];
+      if (t == null) continue;
+      if (t.quadrant != q) continue;
+      out.add(t);
+      seen.add(id);
+    }
+    for (final t in liveOpen[q] ?? const <Task>[]) {
+      if (seen.add(t.id)) out.add(t);
+    }
+    return out;
+  }
+
+  void _onTileToggle(
+    MatrixQuadrant q,
+    Task task,
+    List<Task> displayed,
+    DateTime today,
+  ) {
+    setState(() {
+      _frozen[q] = displayed.map((t) => t.id).toList(growable: false);
+    });
+    ref.read(tasksProvider.notifier).toggleForDay(task.id, today);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen<int>(matrixRevisitSignalProvider, (prev, next) {
+      if (prev == next) return;
+      setState(_clearFrozen);
+    });
+
+    final today = ref.watch(todayProvider);
+    final liveOpen = ref.watch(matrixItemsProvider);
+    final allTasks = ref.watch(tasksProvider);
+    final byId = {for (final t in allTasks) t.id: t};
+
+    Widget cell(MatrixQuadrant q) {
+      final tasks = _displayQuadrant(q, liveOpen, byId);
+      return _QuadrantSection(
+        quadrant: q,
+        tasks: tasks,
+        today: today,
+        onToggle: (task) => _onTileToggle(q, task, tasks, today),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Matrix')),
@@ -34,21 +111,9 @@ class MatrixScreen extends ConsumerWidget {
                         Expanded(
                           child: Row(
                             children: [
-                              Expanded(
-                                child: _QuadrantSection(
-                                  quadrant: MatrixQuadrant.schedule,
-                                  tasks: items[MatrixQuadrant.schedule] ?? const [],
-                                  today: today,
-                                ),
-                              ),
+                              Expanded(child: cell(MatrixQuadrant.schedule)),
                               const SizedBox(width: 8),
-                              Expanded(
-                                child: _QuadrantSection(
-                                  quadrant: MatrixQuadrant.doFirst,
-                                  tasks: items[MatrixQuadrant.doFirst] ?? const [],
-                                  today: today,
-                                ),
-                              ),
+                              Expanded(child: cell(MatrixQuadrant.doFirst)),
                             ],
                           ),
                         ),
@@ -56,21 +121,9 @@ class MatrixScreen extends ConsumerWidget {
                         Expanded(
                           child: Row(
                             children: [
-                              Expanded(
-                                child: _QuadrantSection(
-                                  quadrant: MatrixQuadrant.eliminate,
-                                  tasks: items[MatrixQuadrant.eliminate] ?? const [],
-                                  today: today,
-                                ),
-                              ),
+                              Expanded(child: cell(MatrixQuadrant.eliminate)),
                               const SizedBox(width: 8),
-                              Expanded(
-                                child: _QuadrantSection(
-                                  quadrant: MatrixQuadrant.delegate,
-                                  tasks: items[MatrixQuadrant.delegate] ?? const [],
-                                  today: today,
-                                ),
-                              ),
+                              Expanded(child: cell(MatrixQuadrant.delegate)),
                             ],
                           ),
                         ),
@@ -178,19 +231,21 @@ class _RotatedAxisText extends StatelessWidget {
 // Quadrant section
 // ---------------------------------------------------------------------------
 
-class _QuadrantSection extends ConsumerWidget {
+class _QuadrantSection extends StatelessWidget {
   const _QuadrantSection({
     required this.quadrant,
     required this.tasks,
     required this.today,
+    required this.onToggle,
   });
 
   final MatrixQuadrant quadrant;
   final List<Task> tasks;
   final DateTime today;
+  final ValueChanged<Task> onToggle;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final color = quadrant.color;
     final surface = AppSemanticColors.tileBackground(context);
 
@@ -214,11 +269,18 @@ class _QuadrantSection extends ConsumerWidget {
           Expanded(
             child: tasks.isEmpty
                 ? _EmptyQuadrant(quadrant: quadrant)
-                : _QuadrantList(
-                    tasks: tasks,
-                    today: today,
-                    onToggle: (t) =>
-                        ref.read(tasksProvider.notifier).toggleForDay(t.id, today),
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                    itemCount: tasks.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 6),
+                    itemBuilder: (context, i) {
+                      final task = tasks[i];
+                      return _MatrixTaskTile(
+                        task: task,
+                        today: today,
+                        onToggle: () => onToggle(task),
+                      );
+                    },
                   ),
           ),
         ],
@@ -277,35 +339,6 @@ class _QuadrantHeader extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _QuadrantList extends StatelessWidget {
-  const _QuadrantList({
-    required this.tasks,
-    required this.today,
-    required this.onToggle,
-  });
-
-  final List<Task> tasks;
-  final DateTime today;
-  final ValueChanged<Task> onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-      itemCount: tasks.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 6),
-      itemBuilder: (context, i) {
-        final task = tasks[i];
-        return _MatrixTaskTile(
-          task: task,
-          today: today,
-          onToggle: () => onToggle(task),
-        );
-      },
     );
   }
 }
@@ -379,16 +412,52 @@ class _MatrixTaskTile extends StatelessWidget {
   final DateTime today;
   final VoidCallback onToggle;
 
+  bool get _isCompleted {
+    if (task.isEvent) return false;
+    return task.isCompletedOn(today);
+  }
+
+  bool get _isOverdue {
+    if (_isCompleted) return false;
+    return matrixUrgencyScore(task, today) < 0;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final urgency = _UrgencyLabel.forTask(task, today, context);
-    final tileColor = AppSemanticColors.subtleSurface(context);
+    final urgency = _UrgencyLabel.forTask(
+      task,
+      today,
+      isCompleted: _isCompleted,
+    );
+
+    final tileColor = _isOverdue
+        ? AppSemanticColors.dangerRed.withValues(alpha: 0.08)
+        : AppSemanticColors.subtleSurface(context);
+
+    final tileBorder = _isOverdue
+        ? Border(
+            left: BorderSide(color: task.color, width: 3),
+            top: BorderSide(
+              color: AppSemanticColors.dangerRed.withValues(alpha: 0.35),
+            ),
+            right: BorderSide(
+              color: AppSemanticColors.dangerRed.withValues(alpha: 0.35),
+            ),
+            bottom: BorderSide(
+              color: AppSemanticColors.dangerRed.withValues(alpha: 0.35),
+            ),
+          )
+        : Border(left: BorderSide(color: task.color, width: 3));
+
+    final titleColor = _isCompleted
+        ? AppSemanticColors.textFaint(context)
+        : AppSemanticColors.textStrong(context);
 
     return Container(
       decoration: BoxDecoration(
         color: tileColor,
         borderRadius: BorderRadius.circular(10),
-        border: Border(left: BorderSide(color: task.color, width: 3)),
+        border: tileBorder,
       ),
       child: InkWell(
         onTap: task.isEvent ? null : onToggle,
@@ -401,7 +470,7 @@ class _MatrixTaskTile extends StatelessWidget {
               if (task.isEvent)
                 Icon(Icons.event, size: 16, color: task.color)
               else
-                _TileCheckbox(color: task.color),
+                _TileCheckbox(completed: _isCompleted),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -411,7 +480,11 @@ class _MatrixTaskTile extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
-                    color: AppSemanticColors.textStrong(context),
+                    color: titleColor,
+                    decoration: _isCompleted
+                        ? TextDecoration.lineThrough
+                        : TextDecoration.none,
+                    decorationColor: AppSemanticColors.textFaint(context),
                   ),
                 ),
               ),
@@ -426,12 +499,24 @@ class _MatrixTaskTile extends StatelessWidget {
 }
 
 class _TileCheckbox extends StatelessWidget {
-  const _TileCheckbox({required this.color});
+  const _TileCheckbox({required this.completed});
 
-  final Color color;
+  final bool completed;
 
   @override
   Widget build(BuildContext context) {
+    if (completed) {
+      return Container(
+        width: 16,
+        height: 16,
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          color: AppSemanticColors.successGreen,
+        ),
+        alignment: Alignment.center,
+        child: const Icon(Icons.check, size: 11, color: Colors.white),
+      );
+    }
     return Container(
       width: 16,
       height: 16,
@@ -450,7 +535,7 @@ class _TileCheckbox extends StatelessWidget {
 // Urgency badge
 // ---------------------------------------------------------------------------
 
-enum _UrgencyTier { overdue, today, soon, later }
+enum _UrgencyTier { overdue, today, soon, later, done }
 
 class _UrgencyLabel {
   const _UrgencyLabel({required this.text, required this.tier});
@@ -458,16 +543,24 @@ class _UrgencyLabel {
   final String text;
   final _UrgencyTier tier;
 
-  /// Computes the badge label and tier from the task's urgency score.
-  /// Recurring tasks active today show as "Today"; otherwise the
-  /// next-occurrence delta is used.
-  static _UrgencyLabel forTask(Task t, DateTime today, BuildContext context) {
+  /// Computes the badge label and tier. Completed tasks always show a
+  /// neutral "Done" pill regardless of their date so the cross-off is the
+  /// dominant signal.
+  static _UrgencyLabel forTask(
+    Task t,
+    DateTime today, {
+    required bool isCompleted,
+  }) {
+    if (isCompleted) {
+      return const _UrgencyLabel(text: 'DONE', tier: _UrgencyTier.done);
+    }
+
     final score = matrixUrgencyScore(t, today);
 
     if (score < 0) {
       final days = -score;
       return _UrgencyLabel(
-        text: days == 1 ? '1d late' : '${days}d late',
+        text: days == 1 ? 'OVERDUE 1d' : 'OVERDUE ${days}d',
         tier: _UrgencyTier.overdue,
       );
     }
@@ -481,7 +574,7 @@ class _UrgencyLabel {
       );
     }
     return _UrgencyLabel(
-      text: _shortDateForScore(t, today, score),
+      text: _shortDateForScore(today, score),
       tier: _UrgencyTier.later,
     );
   }
@@ -491,7 +584,7 @@ class _UrgencyLabel {
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ];
 
-  static String _shortDateForScore(Task t, DateTime today, int score) {
+  static String _shortDateForScore(DateTime today, int score) {
     final target = today.add(Duration(days: score));
     return '${_months[target.month - 1]} ${target.day}';
   }
@@ -505,26 +598,30 @@ class _UrgencyBadge extends StatelessWidget {
   Color _bg(BuildContext context) {
     switch (label.tier) {
       case _UrgencyTier.overdue:
-        return AppSemanticColors.dangerRed.withValues(alpha: 0.14);
+        return AppSemanticColors.dangerRed;
       case _UrgencyTier.today:
         return AppSemanticColors.warningOrange.withValues(alpha: 0.18);
       case _UrgencyTier.soon:
         return AppSemanticColors.warningOrange.withValues(alpha: 0.12);
       case _UrgencyTier.later:
         return AppSemanticColors.subtleBorder(context).withValues(alpha: 0.4);
+      case _UrgencyTier.done:
+        return AppSemanticColors.successGreen.withValues(alpha: 0.18);
     }
   }
 
   Color _fg(BuildContext context) {
     switch (label.tier) {
       case _UrgencyTier.overdue:
-        return AppSemanticColors.dangerRed;
+        return Colors.white;
       case _UrgencyTier.today:
         return AppSemanticColors.warningOrange;
       case _UrgencyTier.soon:
         return AppSemanticColors.warningOrange;
       case _UrgencyTier.later:
         return AppSemanticColors.textMuted(context);
+      case _UrgencyTier.done:
+        return AppSemanticColors.successGreen;
     }
   }
 

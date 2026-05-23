@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/task.dart';
+import 'clock_provider.dart';
 import 'tasks_provider.dart';
 
 /// Sentinel score used when a task has no foreseeable next occurrence.
@@ -8,7 +9,17 @@ const int _matrixNoOccurrenceScore = 1 << 30;
 
 DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
-DateTime _todayDate() => _dateOnly(DateTime.now());
+/// True when an event's end date has passed relative to [today].
+///
+/// Computed inline (rather than relying on [Task.hasAutoCompleted], which
+/// reads `DateTime.now()` directly) so that the matrix is fully reactive
+/// to the clock provider — including backward time movement, which causes
+/// previously-ended events to reappear here.
+bool _eventEnded(Task t, DateTime today) {
+  if (!t.isEvent) return false;
+  final e = _dateOnly(t.endDate ?? t.startDate);
+  return today.isAfter(e);
+}
 
 /// Urgency score for matrix sorting.
 ///
@@ -31,11 +42,12 @@ int matrixUrgencyScore(Task t, DateTime today) {
   return _dateOnly(d).difference(base).inDays;
 }
 
-/// Whether the task is open work that the matrix should display.
+/// Whether the task is currently open work that the matrix should display.
 ///
-/// Completed items, auto-completed events, and recurring tasks with no
-/// future occurrence are hidden — the matrix is a decision surface for
-/// pending work only.
+/// The matrix only shows pending work — completed items vanish on the next
+/// panel revisit. Until then the screen layer keeps them visible via its
+/// frozen-id snapshot so completion is a deliberate stroke-through, not a
+/// disappearing trick under the user's finger.
 bool isVisibleInMatrix(Task t, DateTime today) {
   final base = _dateOnly(today);
   if (t.isRecurring) {
@@ -45,7 +57,7 @@ bool isVisibleInMatrix(Task t, DateTime today) {
   }
   if (t.isEvent) {
     if (t.completed) return false;
-    if (t.hasAutoCompleted) return false;
+    if (_eventEnded(t, base)) return false;
     return true;
   }
   return !t.completed;
@@ -53,12 +65,11 @@ bool isVisibleInMatrix(Task t, DateTime today) {
 
 /// Grouped, urgency-sorted view of open tasks for the matrix screen.
 ///
-/// Recomputes whenever [tasksProvider] changes. Within each quadrant items
-/// are sorted ascending by [matrixUrgencyScore] so the most urgent work
-/// floats to the top.
+/// Watches both [tasksProvider] and [todayProvider] so the matrix
+/// recomputes when the data changes *and* when the day rolls over.
 final matrixItemsProvider = Provider<Map<MatrixQuadrant, List<Task>>>((ref) {
   final tasks = ref.watch(tasksProvider);
-  final today = _todayDate();
+  final today = ref.watch(todayProvider);
 
   final grouped = <MatrixQuadrant, List<Task>>{
     for (final q in MatrixQuadrant.values) q: <Task>[],
@@ -84,3 +95,8 @@ final matrixItemsProvider = Provider<Map<MatrixQuadrant, List<Task>>>((ref) {
 
   return grouped;
 });
+
+/// Bumped when the user returns to the Matrix tab from elsewhere. The
+/// screen listens to this to drop its frozen snapshot, which purges
+/// recently-completed tasks from view and re-applies urgency sort.
+final matrixRevisitSignalProvider = StateProvider<int>((ref) => 0);

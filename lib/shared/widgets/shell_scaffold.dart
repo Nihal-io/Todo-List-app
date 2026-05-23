@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../features/calendar/add_item_sheet.dart';
 import '../../providers/home_provider.dart';
+import '../../providers/matrix_provider.dart';
 import '../../providers/selected_day_provider.dart';
 import '../../theme/app_theme.dart';
 
@@ -15,11 +16,16 @@ class ShellScaffold extends ConsumerWidget {
   final StatefulNavigationShell navigationShell;
 
   void _onTap(int index, WidgetRef ref) {
-    final returningToHome =
-        navigationShell.currentIndex != 0 && index == 0;
+    final currentIndex = navigationShell.currentIndex;
+    final returningToHome = currentIndex != 0 && index == 0;
+    final returningToMatrix = currentIndex != 1 && index == 1;
     if (returningToHome) {
       final next = ref.read(homeRevisitSignalProvider) + 1;
       ref.read(homeRevisitSignalProvider.notifier).state = next;
+    }
+    if (returningToMatrix) {
+      final next = ref.read(matrixRevisitSignalProvider) + 1;
+      ref.read(matrixRevisitSignalProvider.notifier).state = next;
     }
     navigationShell.goBranch(
       index,
