@@ -1,13 +1,13 @@
 import 'package:go_router/go_router.dart';
 
-import '../features/today/today_screen.dart';
+import '../features/home/home_screen.dart';
 import '../features/matrix/matrix_screen.dart';
 import '../features/calendar/calendar_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../shared/widgets/shell_scaffold.dart';
 
 final GoRouter appRouter = GoRouter(
-  initialLocation: '/today',
+  initialLocation: '/home',
   routes: [
     StatefulShellRoute.indexedStack(
       builder: (context, state, navigationShell) {
@@ -17,8 +17,8 @@ final GoRouter appRouter = GoRouter(
         StatefulShellBranch(
           routes: [
             GoRoute(
-              path: '/today',
-              builder: (context, state) => const TodayScreen(),
+              path: '/home',
+              builder: (context, state) => const HomeScreen(),
             ),
           ],
         ),

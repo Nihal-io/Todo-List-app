@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../features/calendar/add_item_sheet.dart';
 
-class ShellScaffold extends StatelessWidget {
+class ShellScaffold extends ConsumerWidget {
   const ShellScaffold({
     super.key,
     required this.navigationShell,
@@ -17,15 +19,15 @@ class ShellScaffold extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final int currentIndex = navigationShell.currentIndex;
 
     return Scaffold(
       body: navigationShell,
       floatingActionButton: FloatingActionButton(
-        onPressed: () {},
-        tooltip: 'Add task',
+        onPressed: () => showAddItemSheet(context),
+        tooltip: 'Add task or event',
         child: const Icon(Icons.add, size: 28),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
@@ -36,9 +38,9 @@ class ShellScaffold extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             _NavItem(
-              icon: Icons.task_alt_outlined,
-              activeIcon: Icons.task_alt,
-              label: 'Today',
+              icon: Icons.home_outlined,
+              activeIcon: Icons.home_rounded,
+              label: 'Home',
               selected: currentIndex == 0,
               onTap: () => _onTap(0),
               color: theme.colorScheme.primary,
