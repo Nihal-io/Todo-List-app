@@ -24,9 +24,7 @@ class ShellScaffold extends StatelessWidget {
     return Scaffold(
       body: navigationShell,
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          // Add task — will be wired up in a later step
-        },
+        onPressed: () {},
         tooltip: 'Add task',
         child: const Icon(Icons.add, size: 28),
       ),
@@ -38,16 +36,16 @@ class ShellScaffold extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             _NavItem(
-              icon: Icons.wb_sunny_outlined,
-              activeIcon: Icons.wb_sunny,
+              icon: Icons.task_alt_outlined,
+              activeIcon: Icons.task_alt,
               label: 'Today',
               selected: currentIndex == 0,
               onTap: () => _onTap(0),
               color: theme.colorScheme.primary,
             ),
             _NavItem(
-              icon: Icons.grid_view_outlined,
-              activeIcon: Icons.grid_view,
+              icon: Icons.dashboard_outlined,
+              activeIcon: Icons.dashboard,
               label: 'Matrix',
               selected: currentIndex == 1,
               onTap: () => _onTap(1),
@@ -56,16 +54,16 @@ class ShellScaffold extends StatelessWidget {
             // Center gap for FAB
             const SizedBox(width: 64),
             _NavItem(
-              icon: Icons.calendar_month_outlined,
-              activeIcon: Icons.calendar_month,
+              icon: Icons.event_note_outlined,
+              activeIcon: Icons.event_note,
               label: 'Calendar',
               selected: currentIndex == 2,
               onTap: () => _onTap(2),
               color: theme.colorScheme.primary,
             ),
             _NavItem(
-              icon: Icons.settings_outlined,
-              activeIcon: Icons.settings,
+              icon: Icons.tune_outlined,
+              activeIcon: Icons.tune,
               label: 'Settings',
               selected: currentIndex == 3,
               onTap: () => _onTap(3),
