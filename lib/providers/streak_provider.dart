@@ -13,11 +13,19 @@ class TaskStreak {
 }
 
 /// Computes the current and best consecutive-completion streak for a
-/// recurring task, walking backwards from today through every day the
-/// rule applied. Non-recurring tasks return zero streaks.
+/// recurring task. The walk anchors on the latest *applicable* day that has
+/// been marked complete — including future early completions — and walks
+/// backward through every day the rule applies. This way ticking an
+/// upcoming occurrence immediately bumps the streak badge without waiting
+/// for the calendar date to arrive.
+///
+/// Non-recurring tasks return zero streaks.
 final taskStreakProvider = Provider.family<TaskStreak, String>((ref, taskId) {
   final tasks = ref.watch(tasksListProvider);
-  final today = ref.watch(todayProvider);
+  // Re-evaluate at the day boundary so the streak refreshes at midnight even
+  // when no completion happens.
+  ref.watch(todayProvider);
+
   Task? task;
   for (final t in tasks) {
     if (t.id == taskId) {
@@ -35,12 +43,25 @@ final taskStreakProvider = Provider.family<TaskStreak, String>((ref, taskId) {
 
   bool wasCompleted(DateTime d) => completed.any((c) => sameDay(c, d));
 
-  int current = 0;
+  // Anchor on the latest applicable day that has actually been ticked. If
+  // the user completed Monday early on Saturday, the walk starts at Monday
+  // and currentRun counts that completion immediately.
+  DateTime? latestDone;
+  for (final d in completed) {
+    if (!task.recurrence!.appliesOn(d)) continue;
+    if (latestDone == null || d.isAfter(latestDone)) latestDone = d;
+  }
+  if (latestDone == null) {
+    return const TaskStreak(current: 0, best: 0);
+  }
+
   int best = 0;
   int run = 0;
+  int currentRun = 0;
+  bool currentStreakActive = true;
 
-  var cursor = today;
-  // Walk back up to ~2 years to cap the work.
+  var cursor = latestDone;
+  // Cap at ~2 years of history to keep the scan bounded for very old tasks.
   for (var i = 0; i < 730; i++) {
     if (!task.recurrence!.appliesOn(cursor)) {
       cursor = cursor.subtract(const Duration(days: 1));
@@ -49,20 +70,15 @@ final taskStreakProvider = Provider.family<TaskStreak, String>((ref, taskId) {
     if (wasCompleted(cursor)) {
       run++;
       if (run > best) best = run;
-      if (i == 0 ||
-          (i > 0 && current == i) ||
-          (current == run - 1)) {
-        // current is the run ending at "today" if today applies and is done,
-        // or the most recent run ending on the closest applicable day.
-      }
+      if (currentStreakActive) currentRun = run;
     } else {
-      // First miss after today ends the current streak.
-      if (current == 0) current = run;
+      // Any miss between today and the most recent done day breaks the
+      // current streak — only the longest run still counts toward `best`.
+      currentStreakActive = false;
       run = 0;
     }
     cursor = cursor.subtract(const Duration(days: 1));
   }
-  if (current == 0) current = run;
-  if (run > best) best = run;
-  return TaskStreak(current: current, best: best);
+
+  return TaskStreak(current: currentRun, best: best);
 });

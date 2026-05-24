@@ -196,6 +196,7 @@ class SettingsScreen extends ConsumerWidget {
           const SizedBox(height: 8),
           const _SectionHeader('Insights'),
           const _AnalyticsTile(),
+          const _RoadmapCard(),
           const SizedBox(height: 16),
           const _SectionHeader('Reset'),
           _ResetAllTile(onReset: notifier.resetAll),

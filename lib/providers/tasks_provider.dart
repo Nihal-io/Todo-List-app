@@ -38,6 +38,109 @@ List<Task> buildSampleTasks() {
   final today_ = today();
   final endOfNextMonth = DateTime(today_.year, today_.month + 2, 0);
 
+  // Recurring sample-task history. Walks back 60 days from today and ticks
+  // every applicable day except the ones in `skipNthOccurrences`, so the
+  // analytics charts look populated on first launch.
+  Set<DateTime> seedHistory({
+    required WeeklyRecurrence rule,
+    required DateTime start,
+    required DateTime end,
+    required Set<int> skipNthOccurrences,
+  }) {
+    final out = <DateTime>{};
+    var n = 0;
+    for (var d = start; !d.isAfter(end); d = d.add(const Duration(days: 1))) {
+      if (!rule.appliesOn(d)) continue;
+      n++;
+      if (!skipNthOccurrences.contains(n)) {
+        out.add(DateTime(d.year, d.month, d.day));
+      }
+    }
+    return out;
+  }
+
+  final gymStart = today_.subtract(const Duration(days: 60));
+  const gymRule = WeeklyRecurrence(
+    weekdays: {DateTime.monday, DateTime.wednesday, DateTime.friday},
+  );
+  // Gym is "done for the day" only on these past Mon/Wed/Fri dates.
+  // The misses overlap with Standup misses on different days, so the
+  // overall chart shows a mix of 0% / 50% / 100% bars.
+  final gymDone = seedHistory(
+    rule: gymRule,
+    start: gymStart,
+    end: today_.subtract(const Duration(days: 1)),
+    skipNthOccurrences: const {9, 10, 18, 23},
+  );
+
+  // Standup runs every weekday and overlaps Gym on Mon/Wed/Fri. A different
+  // miss pattern means some Gym/Standup days end up at 50% completion.
+  final standupStart = today_.subtract(const Duration(days: 60));
+  const standupRule = WeeklyRecurrence(
+    weekdays: {
+      DateTime.monday,
+      DateTime.tuesday,
+      DateTime.wednesday,
+      DateTime.thursday,
+      DateTime.friday,
+    },
+  );
+  final standupDone = seedHistory(
+    rule: standupRule,
+    start: standupStart,
+    end: today_.subtract(const Duration(days: 1)),
+    skipNthOccurrences: const {4, 5, 12, 19, 27, 33},
+  );
+
+  final yogaStart = today_.subtract(const Duration(days: 60));
+  final yogaRule = WeeklyRecurrence(
+    weekdays: const {DateTime.tuesday, DateTime.thursday},
+    until: endOfNextMonth,
+  );
+  final yogaDone = seedHistory(
+    rule: yogaRule,
+    start: yogaStart,
+    end: today_.subtract(const Duration(days: 1)),
+    skipNthOccurrences: const {3, 7, 8, 14},
+  );
+
+  // Journal runs every single day so it's always one of the contributors.
+  // Combined with Gym/Standup/Read/Yoga, days end up with 1..4 applicable
+  // recurring tasks — and with distinct miss patterns the chart hits the
+  // full 25 / 33 / 50 / 66 / 75 / 100 % spectrum.
+  final journalStart = today_.subtract(const Duration(days: 60));
+  const journalRule = WeeklyRecurrence(weekdays: {
+    DateTime.monday,
+    DateTime.tuesday,
+    DateTime.wednesday,
+    DateTime.thursday,
+    DateTime.friday,
+    DateTime.saturday,
+    DateTime.sunday,
+  });
+  final journalDone = seedHistory(
+    rule: journalRule,
+    start: journalStart,
+    end: today_.subtract(const Duration(days: 1)),
+    skipNthOccurrences: const {6, 13, 20, 28, 35, 42, 51},
+  );
+
+  // Read shares Gym's Mon/Wed/Fri rhythm; together with Gym + Standup +
+  // Journal that puts four tasks on Mon/Wed/Fri, so 25% (1/4), 50%, 75%
+  // and 100% all become reachable on those days.
+  final readStart = today_.subtract(const Duration(days: 60));
+  const readRule = WeeklyRecurrence(weekdays: {
+    DateTime.monday,
+    DateTime.wednesday,
+    DateTime.friday,
+  });
+  final readDone = seedHistory(
+    rule: readRule,
+    start: readStart,
+    end: today_.subtract(const Duration(days: 1)),
+    skipNthOccurrences: const {2, 8, 14, 17, 25},
+  );
+
   return [
     Task(
       id: _uuid.v4(),
@@ -96,12 +199,46 @@ List<Task> buildSampleTasks() {
     Task(
       id: _uuid.v4(),
       title: 'Gym',
-      startDate: today_,
-      recurrence: const WeeklyRecurrence(
-        weekdays: {DateTime.monday, DateTime.wednesday, DateTime.friday},
-      ),
+      startDate: gymStart,
+      recurrence: gymRule,
+      completedDates: gymDone,
+      // One subtask pre-checked so today's overall bar shows partial credit
+      // even before the user touches anything — demonstrates the subtask
+      // weighting on the analytics chart.
+      subtasks: [
+        SubTask(id: _uuid.v4(), title: 'Warm up', completed: true),
+        SubTask(id: _uuid.v4(), title: 'Workout'),
+        SubTask(id: _uuid.v4(), title: 'Cool down'),
+      ],
       priority: TaskPriority.low,
       quadrant: MatrixQuadrant.delegate,
+    ),
+    Task(
+      id: _uuid.v4(),
+      title: 'Standup',
+      startDate: standupStart,
+      recurrence: standupRule,
+      completedDates: standupDone,
+      priority: TaskPriority.medium,
+      quadrant: MatrixQuadrant.delegate,
+    ),
+    Task(
+      id: _uuid.v4(),
+      title: 'Journal',
+      startDate: journalStart,
+      recurrence: journalRule,
+      completedDates: journalDone,
+      priority: TaskPriority.low,
+      quadrant: MatrixQuadrant.schedule,
+    ),
+    Task(
+      id: _uuid.v4(),
+      title: 'Read',
+      startDate: readStart,
+      recurrence: readRule,
+      completedDates: readDone,
+      priority: TaskPriority.medium,
+      quadrant: MatrixQuadrant.schedule,
     ),
     Task(
       id: _uuid.v4(),
@@ -113,11 +250,9 @@ List<Task> buildSampleTasks() {
     Task(
       id: _uuid.v4(),
       title: 'Yoga',
-      startDate: today_,
-      recurrence: WeeklyRecurrence(
-        weekdays: const {DateTime.tuesday, DateTime.thursday},
-        until: endOfNextMonth,
-      ),
+      startDate: yogaStart,
+      recurrence: yogaRule,
+      completedDates: yogaDone,
       priority: TaskPriority.low,
       quadrant: MatrixQuadrant.eliminate,
     ),
@@ -297,6 +432,11 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
   /// from `completedDates`. Non-recurring tasks and events flip `completed`.
   ///
   /// Completing is blocked while any subtask remains unchecked.
+  ///
+  /// For recurring tasks, completing on a day the recurrence doesn't apply
+  /// to (e.g. an early tick from the grid or detail sheet on an off-day)
+  /// snaps to the next applicable occurrence so the streak provider and
+  /// analytics actually count it.
   Future<TaskToggleResult> toggleForDay(String id, DateTime day) async {
     Task? target;
     for (final t in _current) {
@@ -307,7 +447,7 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
     }
     if (target == null) return TaskToggleResult.unchanged;
 
-    final d = dateOnly(day);
+    final d = _effectiveActionDay(target, day);
     final completing = !target.isCompletedOn(d);
     if (completing && !target.allSubtasksComplete) {
       return TaskToggleResult.blockedSubtasks;
@@ -340,6 +480,18 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
     return completing
         ? TaskToggleResult.completed
         : TaskToggleResult.uncompleted;
+  }
+
+  /// Snaps a calendar day to a date that the streak/analytics layer will
+  /// actually count: for recurring tasks ticked on a non-applicable day,
+  /// pushes the tick forward to the next occurrence the rule applies to.
+  /// No-op for non-recurring tasks or days already on the rule.
+  DateTime _effectiveActionDay(Task task, DateTime day) {
+    final d = dateOnly(day);
+    if (!task.isRecurring) return d;
+    if (task.recurrence!.appliesOn(d)) return d;
+    final snapped = task.nextOccurrenceAfter(d);
+    return snapped == null ? d : dateOnly(snapped);
   }
 
   Future<void> updateTask(Task task) async {
@@ -459,7 +611,7 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
   Task _setParentCompleted(Task task, DateTime? day, bool complete) {
     if (task.isRecurring) {
       if (day == null) return task;
-      final d = dateOnly(day);
+      final d = _effectiveActionDay(task, day);
       final newSet = {...task.completedDates};
       final existing = newSet
           .where((x) => x.year == d.year && x.month == d.month && x.day == d.day)
