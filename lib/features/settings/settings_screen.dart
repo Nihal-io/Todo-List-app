@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../models/app_settings.dart';
 import '../../models/task.dart';
@@ -192,6 +193,9 @@ class SettingsScreen extends ConsumerWidget {
               }
             },
           ),
+          const SizedBox(height: 8),
+          const _SectionHeader('Insights'),
+          const _AnalyticsTile(),
           const SizedBox(height: 16),
           const _SectionHeader('Reset'),
           _ResetAllTile(onReset: notifier.resetAll),
@@ -831,6 +835,74 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
           child: const Text('Apply'),
         ),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Analytics entry
+// ---------------------------------------------------------------------------
+
+class _AnalyticsTile extends StatelessWidget {
+  const _AnalyticsTile();
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppSemanticColors.tileBackground(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppSemanticColors.tileBorder(context)),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => context.push('/analytics'),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Icons.insights_rounded, size: 20, color: primary),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Recurring task analytics',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: AppSemanticColors.textStrong(context),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Streaks, completion rates, and the last two weeks at a glance.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppSemanticColors.textMuted(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right,
+                color: AppSemanticColors.textFaint(context),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

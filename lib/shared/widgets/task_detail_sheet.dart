@@ -114,6 +114,25 @@ class _TaskDetailSheet extends ConsumerWidget {
                 showCompleteToggle: !activeTask.isEvent,
                 streak: streak,
                 onToggleComplete: () async {
+                  // Completing the parent from the sheet implies "I'm done
+                  // with the whole thing" — cascade into any unfinished
+                  // subtasks instead of blocking on them.
+                  if (!done &&
+                      activeTask.hasSubtasks &&
+                      !activeTask.allSubtasksComplete) {
+                    await ref
+                        .read(tasksProvider.notifier)
+                        .toggleAllSubtasks(activeTask.id,
+                            actionDay: referenceDate);
+                    if (!context.mounted) return;
+                    showTaskCompletedSnackBar(
+                      context,
+                      task: activeTask,
+                      day: referenceDate,
+                      recurring: activeTask.isRecurring,
+                    );
+                    return;
+                  }
                   final result = await ref
                       .read(tasksProvider.notifier)
                       .toggleForDay(activeTask.id, referenceDate);

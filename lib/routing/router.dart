@@ -1,5 +1,6 @@
 import 'package:go_router/go_router.dart';
 
+import '../features/analytics/analytics_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/matrix/matrix_screen.dart';
 import '../features/calendar/calendar_screen.dart';
@@ -47,6 +48,10 @@ final GoRouter appRouter = GoRouter(
           ],
         ),
       ],
+    ),
+    GoRoute(
+      path: '/analytics',
+      builder: (context, state) => const AnalyticsScreen(),
     ),
   ],
 );

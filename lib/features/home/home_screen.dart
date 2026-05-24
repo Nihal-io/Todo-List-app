@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -38,11 +36,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   List<String>? _frozenUpcomingIds;
   List<String>? _frozenOverdueIds;
 
-  /// Drag-to-reorder is opt-in per section so accidental drags don't shuffle
-  /// the auto-sorted list.
-  bool _reorderCurrent = false;
-  bool _reorderUpcoming = false;
-
   static const _maxCollapsedOverdue = 3;
 
   void _enableAllSorting() {
@@ -71,9 +64,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   List<Task> _displayCurrent(List<Task> raw, DateTime today) {
-    if (_reorderCurrent) {
-      return [...raw]..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
-    }
     return applyHomeDisplayOrder(
       tasks: raw,
       sortEnabled: _sortCurrent,
@@ -83,9 +73,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   List<Task> _displayUpcoming(List<Task> raw, DateTime today) {
-    if (_reorderUpcoming) {
-      return [...raw]..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
-    }
     return applyHomeDisplayOrder(
       tasks: raw,
       sortEnabled: _sortUpcoming,
@@ -189,7 +176,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     DateTime today,
     List<Task> displayed, {
     required bool upcoming,
-    required bool reorderable,
   }) async {
     final selection = ref.read(selectionProvider);
     if (selection.active) {
@@ -203,7 +189,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       return;
     }
 
-    if (task.hasSubtasks && !reorderable) {
+    if (task.hasSubtasks) {
       ref.read(expandedSubtaskTaskIdProvider.notifier).toggle(task.id);
       return;
     }
@@ -288,16 +274,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     await _freezeAndToggleOverdue(task, displayed);
   }
 
-  void _onReorderCurrent(List<Task> displayed, int oldIndex, int newIndex) {
-    if (newIndex > oldIndex) newIndex -= 1;
-    final list = [...displayed];
-    final moved = list.removeAt(oldIndex);
-    list.insert(newIndex, moved);
-    unawaited(ref
-        .read(tasksProvider.notifier)
-        .reorder(list.map((t) => t.id).toList()));
-  }
-
   @override
   Widget build(BuildContext context) {
     ref.listen<int>(homeRevisitSignalProvider, (previous, next) {
@@ -371,32 +347,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   tooltip: 'More',
                   onSelected: (a) => _handleAction(a),
                   itemBuilder: (_) => [
-                    PopupMenuItem(
-                      value: _HomeAction.toggleReorderCurrent,
-                      child: Row(
-                        children: [
-                          Icon(_reorderCurrent ? Icons.check : Icons.swap_vert,
-                              size: 18),
-                          const SizedBox(width: 10),
-                          Text(_reorderCurrent
-                              ? 'Reorder: ON (current)'
-                              : 'Reorder current'),
-                        ],
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: _HomeAction.toggleReorderUpcoming,
-                      child: Row(
-                        children: [
-                          Icon(_reorderUpcoming ? Icons.check : Icons.swap_vert,
-                              size: 18),
-                          const SizedBox(width: 10),
-                          Text(_reorderUpcoming
-                              ? 'Reorder: ON (upcoming)'
-                              : 'Reorder upcoming'),
-                        ],
-                      ),
-                    ),
                     const PopupMenuItem(
                       value: _HomeAction.selectMode,
                       child: Row(
@@ -476,7 +426,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       today,
                       current,
                       upcoming: false,
-                      reorderable: _reorderCurrent,
                     ),
                     onLongPress: (task) => _openOverview(task, today),
                     onSubtaskToggle: (task, subtask) => _handleSubtaskToggle(
@@ -494,8 +443,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       section: _HomeListSection.current,
                       upcoming: false,
                     ),
-                    reorderable: _reorderCurrent,
-                    onReorder: (a, b) => _onReorderCurrent(current, a, b),
                     selectionIds: selection.active ? selection.ids : null,
                   )
                 else
@@ -515,7 +462,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       today,
                       upcoming,
                       upcoming: true,
-                      reorderable: _reorderUpcoming,
                     ),
                     onLongPress: (task) => _openOverview(task, today),
                     onSubtaskToggle: (task, subtask) => _handleSubtaskToggle(
@@ -533,8 +479,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       section: _HomeListSection.upcoming,
                       upcoming: true,
                     ),
-                    reorderable: _reorderUpcoming,
-                    onReorder: (a, b) => _onReorderCurrent(upcoming, a, b),
                     selectionIds: selection.active ? selection.ids : null,
                   ),
               ],
@@ -547,18 +491,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _handleAction(_HomeAction action) {
     switch (action) {
-      case _HomeAction.toggleReorderCurrent:
-        setState(() {
-          _reorderCurrent = !_reorderCurrent;
-          if (_reorderCurrent) _sortCurrent = false;
-        });
-        break;
-      case _HomeAction.toggleReorderUpcoming:
-        setState(() {
-          _reorderUpcoming = !_reorderUpcoming;
-          if (_reorderUpcoming) _sortUpcoming = false;
-        });
-        break;
       case _HomeAction.selectMode:
         ref.read(expandedSubtaskTaskIdProvider.notifier).collapse();
         ref.read(selectionProvider.notifier).enter();
@@ -567,7 +499,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
-enum _HomeAction { toggleReorderCurrent, toggleReorderUpcoming, selectMode }
+enum _HomeAction { selectMode }
 
 // ---------------------------------------------------------------------------
 // Multi-select app bar
@@ -1089,7 +1021,7 @@ class _ToggleButton extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Task list — supports drag-to-reorder and selection mode
+// Task list
 // ---------------------------------------------------------------------------
 
 class _TaskList extends ConsumerWidget {
@@ -1106,8 +1038,6 @@ class _TaskList extends ConsumerWidget {
     this.upcoming = false,
     required this.emptyIcon,
     required this.emptyText,
-    required this.reorderable,
-    required this.onReorder,
     required this.selectionIds,
   });
 
@@ -1123,8 +1053,6 @@ class _TaskList extends ConsumerWidget {
   final bool upcoming;
   final IconData emptyIcon;
   final String emptyText;
-  final bool reorderable;
-  final void Function(int oldIndex, int newIndex) onReorder;
   final Set<String>? selectionIds;
 
   DateTime get _today {
@@ -1159,40 +1087,6 @@ class _TaskList extends ConsumerWidget {
     final gap = (8 * density.paddingMultiplier).round().toDouble();
     final expandedSubtaskId = ref.watch(expandedSubtaskTaskIdProvider);
 
-    if (reorderable) {
-      return ReorderableListView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        buildDefaultDragHandles: true,
-        itemCount: tasks.length,
-        // ignore: deprecated_member_use
-        onReorder: onReorder,
-        itemBuilder: (context, i) {
-          final t = tasks[i];
-          return Padding(
-            key: ValueKey(t.id),
-            padding: EdgeInsets.only(bottom: gap),
-            child: _HomeTaskTile(
-              task: t,
-              referenceDay: _today,
-              upcoming: upcoming,
-              density: density,
-              dateFormat: dateFormat,
-              accentColor: quadrantColors[t.quadrant] ?? t.color,
-              onTap: () => onRowTap(t),
-              onLongPress: () => onLongPress(t),
-              onCheckboxTap: () => onCheckboxTap(t),
-              onSubtaskToggle: (s) => onSubtaskToggle(t, s),
-              subtasksExpanded: expandedSubtaskId == t.id,
-              reorderable: true,
-              selected: selectionIds?.contains(t.id) ?? false,
-              selectionActive: selectionIds != null,
-            ),
-          );
-        },
-      );
-    }
-
     return Column(
       children: [
         for (final t in tasks)
@@ -1210,7 +1104,6 @@ class _TaskList extends ConsumerWidget {
               onCheckboxTap: () => onCheckboxTap(t),
               onSubtaskToggle: (s) => onSubtaskToggle(t, s),
               subtasksExpanded: expandedSubtaskId == t.id,
-              reorderable: false,
               selected: selectionIds?.contains(t.id) ?? false,
               selectionActive: selectionIds != null,
             ),
@@ -1233,7 +1126,6 @@ class _HomeTaskTile extends StatelessWidget {
     required this.onSubtaskToggle,
     required this.subtasksExpanded,
     this.upcoming = false,
-    required this.reorderable,
     required this.selected,
     required this.selectionActive,
   });
@@ -1249,7 +1141,6 @@ class _HomeTaskTile extends StatelessWidget {
   final ValueChanged<SubTask> onSubtaskToggle;
   final bool subtasksExpanded;
   final bool upcoming;
-  final bool reorderable;
   final bool selected;
   final bool selectionActive;
 
@@ -1417,14 +1308,6 @@ class _HomeTaskTile extends StatelessWidget {
                               subtasksTotal: 0,
                               color: accentColor,
                             ),
-                        ],
-                        if (reorderable) ...[
-                          const SizedBox(width: 4),
-                          Icon(
-                            Icons.drag_indicator,
-                            size: 18,
-                            color: AppSemanticColors.textFaint(context),
-                          ),
                         ],
                       ],
                     ),
