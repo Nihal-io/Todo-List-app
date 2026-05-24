@@ -125,7 +125,10 @@ class _MatrixScreenState extends ConsumerState<MatrixScreen> {
   Widget build(BuildContext context) {
     ref.listen<int>(matrixRevisitSignalProvider, (prev, next) {
       if (prev == next) return;
-      setState(_clearFrozen);
+      setState(() {
+        _clearFrozen();
+        _editMode = false;
+      });
     });
 
     final settings = ref.watch(resolvedSettingsProvider);
@@ -172,23 +175,29 @@ class _MatrixScreenState extends ConsumerState<MatrixScreen> {
             onPressed: () =>
                 ref.read(searchBarOpenProvider.notifier).state = !searchOpen,
           ),
-          PopupMenuButton<_MatrixAction>(
-            tooltip: 'More',
-            onSelected: _handleAction,
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                value: _MatrixAction.toggleEditMode,
-                child: Row(
-                  children: [
-                    Icon(_editMode ? Icons.check : Icons.edit_outlined,
-                        size: 18),
-                    const SizedBox(width: 10),
-                    Text(_editMode ? 'Edit mode: ON' : 'Edit mode'),
-                  ],
+          if (_editMode)
+            IconButton(
+              tooltip: 'Exit edit mode',
+              icon: const Icon(Icons.close),
+              onPressed: () => setState(() => _editMode = false),
+            )
+          else
+            PopupMenuButton<_MatrixAction>(
+              tooltip: 'More',
+              onSelected: _handleAction,
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: _MatrixAction.toggleEditMode,
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit_outlined, size: 18),
+                      SizedBox(width: 10),
+                      Text('Edit mode'),
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(44),
