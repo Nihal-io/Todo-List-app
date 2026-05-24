@@ -9,14 +9,14 @@ import '../../providers/streak_provider.dart';
 import '../../providers/tasks_provider.dart';
 import '../../shared/date_format.dart';
 import '../../theme/app_theme.dart';
+import 'task_snackbars.dart';
 
 /// Shows a compact, read-mostly view of a task as a bottom sheet. Surfaces
 /// the title, quadrant, dates, notes, and an interactive subtask checklist.
-/// Edit and delete actions live in the sheet so the row tap behaviour is
-/// non-intrusive (no full edit form on a single tap).
+/// Edit and delete actions live in the sheet.
 ///
-/// Pair this with long-press → `showAddItemSheet(taskToEdit: ...)` on the
-/// caller to keep the "tap = peek, long-press = edit" UX consistent.
+/// Pair with list-row gestures: **tap** to complete (or expand subtasks on
+/// Home), **long-press** to open this overview sheet.
 Future<void> showTaskDetailSheet(
   BuildContext context, {
   required String taskId,
@@ -64,16 +64,18 @@ class _TaskDetailSheet extends ConsumerWidget {
       return const SizedBox.shrink();
     }
 
+    final activeTask = task;
+
     final settings = ref.watch(resolvedSettingsProvider);
     final quadrantColors = ref.watch(quadrantColorsProvider);
-    final accent = quadrantColors[task.quadrant] ?? task.color;
+    final accent = quadrantColors[activeTask.quadrant] ?? activeTask.color;
     final theme = Theme.of(context);
     final now = referenceDay ?? DateTime.now();
     final referenceDate = DateTime(now.year, now.month, now.day);
-    final done = task.isCompletedOn(referenceDate);
+    final done = activeTask.isCompletedOn(referenceDate);
 
-    final streak = task.isRecurring
-        ? ref.watch(taskStreakProvider(task.id))
+    final streak = activeTask.isRecurring
+        ? ref.watch(taskStreakProvider(activeTask.id))
         : null;
 
     return Padding(
@@ -105,37 +107,74 @@ class _TaskDetailSheet extends ConsumerWidget {
               ),
               const SizedBox(height: 16),
               _Header(
-                task: task,
+                task: activeTask,
                 accent: accent,
                 completed: done,
+                showCompleteToggle: !activeTask.isEvent,
+                onToggleComplete: () async {
+                  final result = await ref
+                      .read(tasksProvider.notifier)
+                      .toggleForDay(activeTask.id, referenceDate);
+                  if (!context.mounted) return;
+                  switch (result) {
+                    case TaskToggleResult.completed:
+                      showTaskCompletedSnackBar(
+                        context,
+                        task: activeTask,
+                        day: referenceDate,
+                        recurring: activeTask.isRecurring,
+                      );
+                    case TaskToggleResult.blockedSubtasks:
+                      showSubtaskBlockedSnackBar(context);
+                    case TaskToggleResult.uncompleted:
+                    case TaskToggleResult.unchanged:
+                      break;
+                  }
+                },
                 onClose: () => Navigator.of(context).pop(),
               ),
               const SizedBox(height: 8),
               _MetaRow(
-                task: task,
+                task: activeTask,
                 dateFormat: settings.dateFormat,
                 accent: accent,
               ),
-              if (task.notes.isNotEmpty) ...[
+              if (activeTask.notes.isNotEmpty) ...[
                 const SizedBox(height: 14),
-                _NotesBlock(notes: task.notes),
+                _NotesBlock(notes: activeTask.notes),
               ],
               if (streak != null) ...[
                 const SizedBox(height: 14),
                 _StreakBlock(streak: streak, accent: accent),
               ],
               const SizedBox(height: 14),
-              if (task.subtasks.isNotEmpty) ...[
+              if (activeTask.subtasks.isNotEmpty) ...[
                 _SubtaskList(
-                  task: task,
-                  onToggle: (s) => ref
-                      .read(tasksProvider.notifier)
-                      .toggleSubtask(task!.id, s.id),
+                  task: activeTask,
+                  onToggle: (s) async {
+                    final result = await ref
+                        .read(tasksProvider.notifier)
+                        .toggleSubtask(
+                          activeTask.id,
+                          s.id,
+                          actionDay: referenceDate,
+                        );
+                    if (!context.mounted) return;
+                    if (result.parentAutoCompleted) {
+                      showSubtaskAutoCompletedSnackBar(
+                        context,
+                        task: activeTask,
+                        subtaskId: s.id,
+                        actionDay: referenceDate,
+                        recurring: activeTask.isRecurring,
+                      );
+                    }
+                  },
                 ),
                 const SizedBox(height: 14),
               ],
-              if (task.tags.isNotEmpty) ...[
-                _TagsBlock(tags: task.tags),
+              if (activeTask.tags.isNotEmpty) ...[
+                _TagsBlock(tags: activeTask.tags),
                 const SizedBox(height: 14),
               ],
               Row(
@@ -147,7 +186,7 @@ class _TaskDetailSheet extends ConsumerWidget {
                         if (onDeleteOverride != null) {
                           await onDeleteOverride!();
                         } else {
-                          await _confirmAndDelete(context, ref, task!);
+                          await _confirmAndDelete(context, ref, activeTask);
                         }
                       },
                       icon: Icon(Icons.delete_outline,
@@ -171,7 +210,7 @@ class _TaskDetailSheet extends ConsumerWidget {
                     child: ElevatedButton.icon(
                       onPressed: () {
                         Navigator.of(context).pop();
-                        showAddItemSheet(context, taskToEdit: task);
+                        showAddItemSheet(context, taskToEdit: activeTask);
                       },
                       icon: const Icon(Icons.edit_outlined),
                       label: const Text('Edit'),
@@ -225,12 +264,16 @@ class _Header extends StatelessWidget {
     required this.task,
     required this.accent,
     required this.completed,
+    required this.showCompleteToggle,
+    required this.onToggleComplete,
     required this.onClose,
   });
 
   final Task task;
   final Color accent;
   final bool completed;
+  final bool showCompleteToggle;
+  final VoidCallback onToggleComplete;
   final VoidCallback onClose;
 
   @override
@@ -238,6 +281,33 @@ class _Header extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (showCompleteToggle) ...[
+          GestureDetector(
+            onTap: onToggleComplete,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 24,
+              height: 24,
+              margin: const EdgeInsets.only(top: 6),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: completed
+                      ? AppSemanticColors.successGreen
+                      : AppSemanticColors.subtleBorder(context),
+                  width: 2,
+                ),
+                color: completed
+                    ? AppSemanticColors.successGreen
+                    : Colors.transparent,
+              ),
+              child: completed
+                  ? const Icon(Icons.check, size: 14, color: Colors.white)
+                  : null,
+            ),
+          ),
+          const SizedBox(width: 10),
+        ],
         Container(
           width: 4,
           height: 36,

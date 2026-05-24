@@ -12,12 +12,12 @@ import '../../theme/app_theme.dart';
 
 const _uuid = Uuid();
 
-void showAddItemSheet(
+Future<Task?> showAddItemSheet(
   BuildContext context, {
   DateTime? initialDate,
   Task? taskToEdit,
 }) {
-  showModalBottomSheet<void>(
+  return showModalBottomSheet<Task?>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
@@ -298,10 +298,11 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
 
     if (_isEditing) {
       ref.read(tasksProvider.notifier).updateTask(task);
+      Navigator.of(context).pop();
     } else {
       ref.read(tasksProvider.notifier).add(task);
+      Navigator.of(context).pop(task);
     }
-    Navigator.of(context).pop();
   }
 
   Future<void> _confirmDelete() async {

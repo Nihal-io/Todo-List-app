@@ -11,6 +11,25 @@ import '../shared/date_utils.dart';
 
 const _uuid = Uuid();
 
+/// Outcome of attempting to toggle a task's completion state.
+enum TaskToggleResult {
+  completed,
+  uncompleted,
+  blockedSubtasks,
+  unchanged,
+}
+
+/// Outcome of toggling a subtask, including any parent sync.
+class SubtaskToggleResult {
+  const SubtaskToggleResult({
+    this.parentAutoCompleted = false,
+    this.parentAutoUncompleted = false,
+  });
+
+  final bool parentAutoCompleted;
+  final bool parentAutoUncompleted;
+}
+
 // ---------------------------------------------------------------------------
 // Sample data — used the first time the app boots (no persisted file yet).
 // ---------------------------------------------------------------------------
@@ -240,50 +259,87 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
 
   /// Toggle for non-recurring tasks and events (flips the single `completed`
   /// bool). For recurring tasks, use [toggleForDay].
-  Future<void> toggle(String id) async {
-    final next = <Task>[];
-    Task? updated;
+  ///
+  /// Completing is blocked while any subtask remains unchecked.
+  Future<TaskToggleResult> toggle(String id) async {
+    Task? target;
     for (final t in _current) {
-      if (t.id == id && !t.isRecurring) {
-        updated = t.copyWith(completed: !t.completed);
-        next.add(updated);
+      if (t.id == id) {
+        target = t;
+        break;
+      }
+    }
+    if (target == null || target.isRecurring) {
+      return TaskToggleResult.unchanged;
+    }
+
+    final completing = !target.completed;
+    if (completing && !target.allSubtasksComplete) {
+      return TaskToggleResult.blockedSubtasks;
+    }
+
+    final next = <Task>[];
+    for (final t in _current) {
+      if (t.id == id) {
+        next.add(t.copyWith(completed: completing));
       } else {
         next.add(t);
       }
     }
     await _commit(next);
     _rescheduleAll(next);
+    return completing
+        ? TaskToggleResult.completed
+        : TaskToggleResult.uncompleted;
   }
 
   /// Toggle completion for a specific day. Recurring tasks add/remove the day
   /// from `completedDates`. Non-recurring tasks and events flip `completed`.
-  Future<void> toggleForDay(String id, DateTime day) async {
+  ///
+  /// Completing is blocked while any subtask remains unchecked.
+  Future<TaskToggleResult> toggleForDay(String id, DateTime day) async {
+    Task? target;
+    for (final t in _current) {
+      if (t.id == id) {
+        target = t;
+        break;
+      }
+    }
+    if (target == null) return TaskToggleResult.unchanged;
+
+    final d = dateOnly(day);
+    final completing = !target.isCompletedOn(d);
+    if (completing && !target.allSubtasksComplete) {
+      return TaskToggleResult.blockedSubtasks;
+    }
+
     final next = <Task>[];
-    Task? updated;
     for (final t in _current) {
       if (t.id != id) {
         next.add(t);
         continue;
       }
       if (t.isRecurring) {
-        final d = dateOnly(day);
         final newSet = {...t.completedDates};
         final existing = newSet
-            .where((x) => x.year == d.year && x.month == d.month && x.day == d.day)
+            .where((x) =>
+                x.year == d.year && x.month == d.month && x.day == d.day)
             .toList();
         if (existing.isEmpty) {
           newSet.add(d);
         } else {
           newSet.removeAll(existing);
         }
-        updated = t.copyWith(completedDates: newSet);
+        next.add(t.copyWith(completedDates: newSet));
       } else {
-        updated = t.copyWith(completed: !t.completed);
+        next.add(t.copyWith(completed: completing));
       }
-      next.add(updated);
     }
     await _commit(next);
     _rescheduleAll(next);
+    return completing
+        ? TaskToggleResult.completed
+        : TaskToggleResult.uncompleted;
   }
 
   Future<void> updateTask(Task task) async {
@@ -294,37 +350,93 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
     _rescheduleAll(next);
   }
 
-  /// Toggles a single subtask's completed state on its parent.
-  Future<void> toggleSubtask(String taskId, String subtaskId) async {
+  /// Toggles a single subtask's completed state on its parent and keeps the
+  /// parent completion in sync (auto-complete when all subtasks are done;
+  /// uncomplete when any subtask is unchecked).
+  Future<SubtaskToggleResult> toggleSubtask(
+    String taskId,
+    String subtaskId, {
+    DateTime? actionDay,
+  }) async {
+    Task? original;
+    for (final t in _current) {
+      if (t.id == taskId) {
+        original = t;
+        break;
+      }
+    }
+    if (original == null) return const SubtaskToggleResult();
+
+    final day = actionDay != null ? dateOnly(actionDay) : null;
+    final wasParentDone = original.isRecurring
+        ? (day != null && original.isCompletedOn(day))
+        : original.completed;
+
+    var updated = original.copyWith(
+      subtasks: [
+        for (final s in original.subtasks)
+          if (s.id == subtaskId)
+            s.copyWith(completed: !s.completed)
+          else
+            s,
+      ],
+    );
+
+    var parentAutoCompleted = false;
+    var parentAutoUncompleted = false;
+
+    if (updated.allSubtasksComplete && !wasParentDone) {
+      updated = _setParentCompleted(updated, day, true);
+      parentAutoCompleted = true;
+    } else if (!updated.allSubtasksComplete && wasParentDone) {
+      updated = _setParentCompleted(updated, day, false);
+      parentAutoUncompleted = true;
+    }
+
     final next = [
-      for (final t in _current)
-        if (t.id == taskId)
-          t.copyWith(
-            subtasks: [
-              for (final s in t.subtasks)
-                if (s.id == subtaskId)
-                  s.copyWith(completed: !s.completed)
-                else
-                  s,
-            ],
-          )
-        else
-          t,
+      for (final t in _current) (t.id == taskId ? updated : t),
     ];
     await _commit(next);
+    _rescheduleAll(next);
+    return SubtaskToggleResult(
+      parentAutoCompleted: parentAutoCompleted,
+      parentAutoUncompleted: parentAutoUncompleted,
+    );
+  }
+
+  Task _setParentCompleted(Task task, DateTime? day, bool complete) {
+    if (task.isRecurring) {
+      if (day == null) return task;
+      final d = dateOnly(day);
+      final newSet = {...task.completedDates};
+      final existing = newSet
+          .where((x) => x.year == d.year && x.month == d.month && x.day == d.day)
+          .toList();
+      if (complete) {
+        if (existing.isEmpty) newSet.add(d);
+      } else {
+        newSet.removeAll(existing);
+      }
+      return task.copyWith(completedDates: newSet);
+    }
+    return task.copyWith(completed: complete);
   }
 
   // ---------------- Bulk operations (multi-select) ----------------
 
   Future<void> bulkComplete(Set<String> ids, DateTime onDay) async {
+    final d = dateOnly(onDay);
     final next = <Task>[];
     for (final t in _current) {
       if (!ids.contains(t.id)) {
         next.add(t);
         continue;
       }
+      if (!t.allSubtasksComplete) {
+        next.add(t);
+        continue;
+      }
       if (t.isRecurring) {
-        final d = dateOnly(onDay);
         if (t.completedDates.any((x) => sameDay(x, d))) {
           next.add(t);
         } else {

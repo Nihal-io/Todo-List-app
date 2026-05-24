@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/app_settings.dart';
+import '../../models/sub_task.dart';
 import '../../models/task.dart';
 import '../../providers/home_provider.dart';
 import '../../providers/search_filter_provider.dart';
@@ -13,8 +14,8 @@ import '../../providers/tasks_provider.dart';
 import '../../shared/date_format.dart';
 import '../../shared/widgets/task_detail_sheet.dart';
 import '../../shared/widgets/task_search_bar.dart';
+import '../../shared/widgets/task_snackbars.dart';
 import '../../theme/app_theme.dart';
-import '../calendar/add_item_sheet.dart';
 import 'home_task_sort.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -97,35 +98,140 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         comparator: compareOverdueTasks,
       );
 
-  void _freezeAndToggleCurrent(
-      Task task, List<Task> displayed, DateTime today) {
+  Future<void> _freezeAndToggleCurrent(
+      Task task, List<Task> displayed, DateTime today) async {
     setState(() {
       _frozenCurrentIds = displayed.map((t) => t.id).toList();
       _sortCurrent = false;
     });
-    ref.read(tasksProvider.notifier).toggleForDay(task.id, today);
+    final result = await ref
+        .read(tasksProvider.notifier)
+        .toggleForDay(task.id, today);
+    if (!mounted) return;
+    _handleToggleResult(task, today, result, recurring: task.isRecurring);
   }
 
-  void _freezeAndToggleUpcoming(
-      Task task, List<Task> displayed, DateTime today) {
+  Future<void> _freezeAndToggleUpcoming(
+      Task task, List<Task> displayed, DateTime today) async {
     setState(() {
       _frozenUpcomingIds = displayed.map((t) => t.id).toList();
       _sortUpcoming = false;
     });
+    final actionDay =
+        task.actionDayForRow(today, inUpcomingSection: true);
+    final TaskToggleResult result;
     if (task.isRecurring) {
-      final day = task.actionDayForRow(today, inUpcomingSection: true);
-      ref.read(tasksProvider.notifier).toggleForDay(task.id, day);
+      result = await ref
+          .read(tasksProvider.notifier)
+          .toggleForDay(task.id, actionDay);
     } else {
-      ref.read(tasksProvider.notifier).toggle(task.id);
+      result = await ref.read(tasksProvider.notifier).toggle(task.id);
     }
+    if (!mounted) return;
+    _handleToggleResult(
+      task,
+      actionDay,
+      result,
+      recurring: task.isRecurring,
+    );
   }
 
-  void _freezeAndToggleOverdue(Task task, List<Task> displayed) {
+  Future<void> _freezeAndToggleOverdue(
+      Task task, List<Task> displayed) async {
     setState(() {
       _frozenOverdueIds = displayed.map((t) => t.id).toList();
       _sortOverdue = false;
     });
-    ref.read(tasksProvider.notifier).toggle(task.id);
+    final result = await ref.read(tasksProvider.notifier).toggle(task.id);
+    if (!mounted) return;
+    _handleToggleResult(task, task.startDate, result, recurring: false);
+  }
+
+  void _handleToggleResult(
+    Task task,
+    DateTime day,
+    TaskToggleResult result, {
+    required bool recurring,
+  }) {
+    switch (result) {
+      case TaskToggleResult.completed:
+        showTaskCompletedSnackBar(
+          context,
+          task: task,
+          day: day,
+          recurring: recurring,
+        );
+      case TaskToggleResult.blockedSubtasks:
+        showSubtaskBlockedSnackBar(context);
+      case TaskToggleResult.uncompleted:
+      case TaskToggleResult.unchanged:
+        break;
+    }
+  }
+
+  Future<void> _openOverview(Task task, DateTime today) async {
+    await showTaskDetailSheet(
+      context,
+      taskId: task.id,
+      referenceDay: today,
+      onDelete: () => _deleteWithUndo(task),
+    );
+  }
+
+  Future<void> _handleRowTap(
+    Task task,
+    DateTime today,
+    List<Task> displayed, {
+    required bool upcoming,
+    required bool reorderable,
+  }) async {
+    final selection = ref.read(selectionProvider);
+    if (selection.active) {
+      ref.read(selectionProvider.notifier).toggle(task.id);
+      return;
+    }
+
+    final showCheckbox = !task.isEvent || !upcoming;
+    if (!showCheckbox) {
+      await _openOverview(task, today);
+      return;
+    }
+
+    if (task.hasSubtasks && !reorderable) {
+      ref.read(expandedSubtaskTaskIdProvider.notifier).toggle(task.id);
+      return;
+    }
+
+    if (upcoming) {
+      await _freezeAndToggleUpcoming(task, displayed, today);
+    } else {
+      await _freezeAndToggleCurrent(task, displayed, today);
+    }
+  }
+
+  Future<void> _handleSubtaskToggle(
+    Task task,
+    SubTask subtask,
+    DateTime today, {
+    required bool upcoming,
+  }) async {
+    final actionDay =
+        task.actionDayForRow(today, inUpcomingSection: upcoming);
+    final result = await ref.read(tasksProvider.notifier).toggleSubtask(
+          task.id,
+          subtask.id,
+          actionDay: actionDay,
+        );
+    if (!mounted) return;
+    if (result.parentAutoCompleted) {
+      showSubtaskAutoCompletedSnackBar(
+        context,
+        task: task,
+        subtaskId: subtask.id,
+        actionDay: actionDay,
+        recurring: task.isRecurring,
+      );
+    }
   }
 
   @override
@@ -134,18 +240,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _enableAllSorting();
   }
 
-  Future<void> _handleTapTask(Task task, DateTime today) async {
+  Future<void> _handleOverdueRowTap(
+    Task task,
+    DateTime today,
+    List<Task> displayed,
+  ) async {
     final selection = ref.read(selectionProvider);
     if (selection.active) {
       ref.read(selectionProvider.notifier).toggle(task.id);
       return;
     }
-    await showTaskDetailSheet(
-      context,
-      taskId: task.id,
-      referenceDay: today,
-      onDelete: () => _deleteWithUndo(task),
-    );
+    if (task.hasSubtasks) {
+      ref.read(expandedSubtaskTaskIdProvider.notifier).toggle(task.id);
+      return;
+    }
+    await _freezeAndToggleOverdue(task, displayed);
   }
 
   Future<void> _deleteWithUndo(Task task) async {
@@ -324,11 +433,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     maxCollapsed: _maxCollapsedOverdue,
                     onToggleExpanded: () =>
                         setState(() => _showAllOverdue = !_showAllOverdue),
-                    onToggleTask: (task) =>
-                        _freezeAndToggleOverdue(task, overdue),
-                    onOpen: (task) => _handleTapTask(task, today),
-                    onLongPress: (task) =>
-                        showAddItemSheet(context, taskToEdit: task),
+                    referenceDay: today,
+                    onRowTap: (task) =>
+                        _handleOverdueRowTap(task, today, overdue),
+                    onLongPress: (task) => _openOverview(task, today),
+                    onSubtaskToggle: (task, subtask) => _handleSubtaskToggle(
+                      task,
+                      subtask,
+                      today,
+                      upcoming: false,
+                    ),
                     selectionIds: selection.active ? selection.ids : null,
                   ),
                 ],
@@ -354,11 +468,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     emptyText: filter.isActive
                         ? 'No tasks match your filter'
                         : 'Nothing on today',
-                    onToggleTask: (task) =>
-                        _freezeAndToggleCurrent(task, current, today),
-                    onOpen: (task) => _handleTapTask(task, today),
-                    onLongPress: (task) =>
-                        showAddItemSheet(context, taskToEdit: task),
+                    onRowTap: (task) => _handleRowTap(
+                      task,
+                      today,
+                      current,
+                      upcoming: false,
+                      reorderable: _reorderCurrent,
+                    ),
+                    onLongPress: (task) => _openOverview(task, today),
+                    onSubtaskToggle: (task, subtask) => _handleSubtaskToggle(
+                      task,
+                      subtask,
+                      today,
+                      upcoming: false,
+                    ),
                     reorderable: _reorderCurrent,
                     onReorder: (a, b) => _onReorderCurrent(current, a, b),
                     selectionIds: selection.active ? selection.ids : null,
@@ -375,11 +498,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     emptyText: filter.isActive
                         ? 'No upcoming tasks match your filter'
                         : 'No upcoming tasks',
-                    onToggleTask: (task) =>
-                        _freezeAndToggleUpcoming(task, upcoming, today),
-                    onOpen: (task) => _handleTapTask(task, today),
-                    onLongPress: (task) =>
-                        showAddItemSheet(context, taskToEdit: task),
+                    onRowTap: (task) => _handleRowTap(
+                      task,
+                      today,
+                      upcoming,
+                      upcoming: true,
+                      reorderable: _reorderUpcoming,
+                    ),
+                    onLongPress: (task) => _openOverview(task, today),
+                    onSubtaskToggle: (task, subtask) => _handleSubtaskToggle(
+                      task,
+                      subtask,
+                      today,
+                      upcoming: true,
+                    ),
                     reorderable: _reorderUpcoming,
                     onReorder: (a, b) => _onReorderCurrent(upcoming, a, b),
                     selectionIds: selection.active ? selection.ids : null,
@@ -407,6 +539,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         });
         break;
       case _HomeAction.selectMode:
+        ref.read(expandedSubtaskTaskIdProvider.notifier).collapse();
         ref.read(selectionProvider.notifier).enter();
         break;
     }
@@ -577,9 +710,10 @@ class _OverduePanel extends ConsumerWidget {
     required this.expanded,
     required this.maxCollapsed,
     required this.onToggleExpanded,
-    required this.onToggleTask,
-    required this.onOpen,
+    required this.referenceDay,
+    required this.onRowTap,
     required this.onLongPress,
+    required this.onSubtaskToggle,
     required this.selectionIds,
   });
 
@@ -587,15 +721,17 @@ class _OverduePanel extends ConsumerWidget {
   final bool expanded;
   final int maxCollapsed;
   final VoidCallback onToggleExpanded;
-  final ValueChanged<Task> onToggleTask;
-  final ValueChanged<Task> onOpen;
+  final DateTime referenceDay;
+  final ValueChanged<Task> onRowTap;
   final ValueChanged<Task> onLongPress;
+  final void Function(Task task, SubTask subtask) onSubtaskToggle;
   final Set<String>? selectionIds;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final error = theme.colorScheme.error;
+    final expandedSubtaskId = ref.watch(expandedSubtaskTaskIdProvider);
 
     final visible = expanded ? overdue : overdue.take(maxCollapsed).toList();
     final hiddenCount = overdue.length - visible.length;
@@ -639,9 +775,10 @@ class _OverduePanel extends ConsumerWidget {
               padding: const EdgeInsets.only(bottom: 8),
               child: _OverdueTile(
                 task: t,
-                onToggle: () => onToggleTask(t),
-                onOpen: () => onOpen(t),
+                onTap: () => onRowTap(t),
                 onLongPress: () => onLongPress(t),
+                onSubtaskToggle: (s) => onSubtaskToggle(t, s),
+                subtasksExpanded: expandedSubtaskId == t.id,
                 selected: selectionIds?.contains(t.id) ?? false,
                 selectionActive: selectionIds != null,
               ),
@@ -678,17 +815,19 @@ class _OverduePanel extends ConsumerWidget {
 class _OverdueTile extends StatelessWidget {
   const _OverdueTile({
     required this.task,
-    required this.onToggle,
-    required this.onOpen,
+    required this.onTap,
     required this.onLongPress,
+    required this.onSubtaskToggle,
+    required this.subtasksExpanded,
     required this.selected,
     required this.selectionActive,
   });
 
   final Task task;
-  final VoidCallback onToggle;
-  final VoidCallback onOpen;
+  final VoidCallback onTap;
   final VoidCallback onLongPress;
+  final ValueChanged<SubTask> onSubtaskToggle;
+  final bool subtasksExpanded;
   final bool selected;
   final bool selectionActive;
 
@@ -707,74 +846,95 @@ class _OverdueTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border(left: BorderSide(color: statusColor, width: 4)),
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            GestureDetector(
-              onTap: selectionActive ? onOpen : onToggle,
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: selectionActive
-                    ? _Checkbox(
-                        completed: selected, color: theme.colorScheme.primary)
-                    : _Checkbox(completed: done, color: statusColor),
-              ),
-            ),
-            Expanded(
-              child: InkWell(
-                onTap: onOpen,
-                onLongPress: onLongPress,
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        task.title,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: done
-                              ? AppSemanticColors.textFaint(context)
-                              : error,
-                          decoration: done
-                              ? TextDecoration.lineThrough
-                              : TextDecoration.none,
-                          decorationColor: AppSemanticColors.textFaint(context),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        done
-                            ? 'Resolved  ·  ${_overdueAgoLabel(task)}'
-                            : _overdueAgoLabel(task),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: done
-                              ? AppSemanticColors.textFaint(context)
-                              : error.withValues(alpha: 0.85),
-                        ),
-                      ),
-                    ],
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: onTap,
+            onLongPress: onLongPress,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: selectionActive
+                        ? _Checkbox(
+                            completed: selected,
+                            color: theme.colorScheme.primary,
+                          )
+                        : _Checkbox(completed: done, color: statusColor),
                   ),
-                ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          task.title,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: done
+                                ? AppSemanticColors.textFaint(context)
+                                : error,
+                            decoration: done
+                                ? TextDecoration.lineThrough
+                                : TextDecoration.none,
+                            decorationColor:
+                                AppSemanticColors.textFaint(context),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          done
+                              ? 'Resolved  ·  ${_overdueAgoLabel(task)}'
+                              : _overdueAgoLabel(task),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: done
+                                ? AppSemanticColors.textFaint(context)
+                                : error.withValues(alpha: 0.85),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (task.hasSubtasks) ...[
+                    _SubtaskCountBadge(
+                      done: task.completedSubtaskCount,
+                      total: task.subtasks.length,
+                      color: statusColor,
+                    ),
+                    const SizedBox(width: 2),
+                    Icon(
+                      subtasksExpanded
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                      size: 20,
+                      color: AppSemanticColors.textFaint(context),
+                    ),
+                  ] else
+                    _StatusBadge(
+                      isMultiDay: task.isMultiDay,
+                      isRecurring: task.isRecurring,
+                      hasSubtasks: false,
+                      subtasksDone: 0,
+                      subtasksTotal: 0,
+                      color: statusColor,
+                    ),
+                ],
               ),
             ),
-            _StatusBadge(
-              isMultiDay: task.isMultiDay,
-              isRecurring: task.isRecurring,
-              hasSubtasks: task.hasSubtasks,
-              subtasksDone: task.completedSubtaskCount,
-              subtasksTotal: task.subtasks.length,
-              color: statusColor,
+          ),
+          if (subtasksExpanded && task.hasSubtasks)
+            _InlineSubtaskList(
+              subtasks: task.subtasks,
+              onToggle: onSubtaskToggle,
             ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -893,9 +1053,9 @@ class _TaskList extends ConsumerWidget {
     required this.density,
     required this.dateFormat,
     required this.quadrantColors,
-    required this.onToggleTask,
-    required this.onOpen,
+    required this.onRowTap,
     required this.onLongPress,
+    required this.onSubtaskToggle,
     this.upcoming = false,
     required this.emptyIcon,
     required this.emptyText,
@@ -909,9 +1069,9 @@ class _TaskList extends ConsumerWidget {
   final DensityPref density;
   final DateFormatPref dateFormat;
   final Map<MatrixQuadrant, Color> quadrantColors;
-  final ValueChanged<Task> onToggleTask;
-  final ValueChanged<Task> onOpen;
+  final ValueChanged<Task> onRowTap;
   final ValueChanged<Task> onLongPress;
+  final void Function(Task task, SubTask subtask) onSubtaskToggle;
   final bool upcoming;
   final IconData emptyIcon;
   final String emptyText;
@@ -949,6 +1109,7 @@ class _TaskList extends ConsumerWidget {
     }
 
     final gap = (8 * density.paddingMultiplier).round().toDouble();
+    final expandedSubtaskId = ref.watch(expandedSubtaskTaskIdProvider);
 
     if (reorderable) {
       return ReorderableListView.builder(
@@ -970,9 +1131,10 @@ class _TaskList extends ConsumerWidget {
               density: density,
               dateFormat: dateFormat,
               accentColor: quadrantColors[t.quadrant] ?? t.color,
-              onToggle: () => onToggleTask(t),
-              onOpen: () => onOpen(t),
+              onTap: () => onRowTap(t),
               onLongPress: () => onLongPress(t),
+              onSubtaskToggle: (s) => onSubtaskToggle(t, s),
+              subtasksExpanded: expandedSubtaskId == t.id,
               reorderable: true,
               selected: selectionIds?.contains(t.id) ?? false,
               selectionActive: selectionIds != null,
@@ -994,9 +1156,10 @@ class _TaskList extends ConsumerWidget {
               density: density,
               dateFormat: dateFormat,
               accentColor: quadrantColors[t.quadrant] ?? t.color,
-              onToggle: () => onToggleTask(t),
-              onOpen: () => onOpen(t),
+              onTap: () => onRowTap(t),
               onLongPress: () => onLongPress(t),
+              onSubtaskToggle: (s) => onSubtaskToggle(t, s),
+              subtasksExpanded: expandedSubtaskId == t.id,
               reorderable: false,
               selected: selectionIds?.contains(t.id) ?? false,
               selectionActive: selectionIds != null,
@@ -1011,12 +1174,13 @@ class _HomeTaskTile extends StatelessWidget {
   const _HomeTaskTile({
     required this.task,
     required this.referenceDay,
-    required this.onToggle,
+    required this.onTap,
     required this.density,
     required this.dateFormat,
     required this.accentColor,
-    required this.onOpen,
     required this.onLongPress,
+    required this.onSubtaskToggle,
+    required this.subtasksExpanded,
     this.upcoming = false,
     required this.reorderable,
     required this.selected,
@@ -1025,12 +1189,13 @@ class _HomeTaskTile extends StatelessWidget {
 
   final Task task;
   final DateTime referenceDay;
-  final VoidCallback onToggle;
+  final VoidCallback onTap;
   final DensityPref density;
   final DateFormatPref dateFormat;
   final Color accentColor;
-  final VoidCallback onOpen;
   final VoidCallback onLongPress;
+  final ValueChanged<SubTask> onSubtaskToggle;
+  final bool subtasksExpanded;
   final bool upcoming;
   final bool reorderable;
   final bool selected;
@@ -1085,89 +1250,107 @@ class _HomeTaskTile extends StatelessWidget {
           ),
         ],
       ),
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            GestureDetector(
-              onTap:
-                  selectionActive ? onOpen : (showCheckbox ? onToggle : onOpen),
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: selectionActive
-                    ? _Checkbox(
-                        completed: selected,
-                        color: theme.colorScheme.primary,
-                      )
-                    : (showCheckbox
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: onTap,
+            onLongPress: onLongPress,
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: selectionActive
                         ? _Checkbox(
-                            completed: _isDone,
-                            color: AppSemanticColors.successGreen,
+                            completed: selected,
+                            color: theme.colorScheme.primary,
                           )
-                        : Icon(Icons.event, size: 22, color: accentColor)),
-              ),
-            ),
-            Expanded(
-              child: InkWell(
-                onTap: onOpen,
-                onLongPress: onLongPress,
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        task.title,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: _isDone
-                              ? AppSemanticColors.textFaint(context)
-                              : AppSemanticColors.textStrong(context),
-                          decoration: _isDone
-                              ? TextDecoration.lineThrough
-                              : TextDecoration.none,
-                          decorationColor: AppSemanticColors.textFaint(context),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _dateLabel,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: AppSemanticColors.textFaint(context),
-                        ),
-                      ),
-                    ],
+                        : (showCheckbox
+                            ? _Checkbox(
+                                completed: _isDone,
+                                color: AppSemanticColors.successGreen,
+                              )
+                            : Icon(Icons.event,
+                                size: 22, color: accentColor)),
                   ),
-                ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          task.title,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: _isDone
+                                ? AppSemanticColors.textFaint(context)
+                                : AppSemanticColors.textStrong(context),
+                            decoration: _isDone
+                                ? TextDecoration.lineThrough
+                                : TextDecoration.none,
+                            decorationColor:
+                                AppSemanticColors.textFaint(context),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _dateLabel,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppSemanticColors.textFaint(context),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (!task.isEvent) ...[
+                    if (task.hasSubtasks) ...[
+                      _SubtaskCountBadge(
+                        done: task.completedSubtaskCount,
+                        total: task.subtasks.length,
+                        color: accentColor,
+                      ),
+                      const SizedBox(width: 2),
+                      Icon(
+                        subtasksExpanded
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
+                        size: 20,
+                        color: AppSemanticColors.textFaint(context),
+                      ),
+                    ] else
+                      _StatusBadge(
+                        isMultiDay: task.isMultiDay,
+                        isRecurring: task.isRecurring,
+                        hasSubtasks: false,
+                        subtasksDone: 0,
+                        subtasksTotal: 0,
+                        color: accentColor,
+                      ),
+                  ],
+                  if (reorderable) ...[
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.drag_indicator,
+                      size: 18,
+                      color: AppSemanticColors.textFaint(context),
+                    ),
+                  ],
+                ],
               ),
             ),
-            if (!task.isEvent) ...[
-              const SizedBox(width: 4),
-              _StatusBadge(
-                isMultiDay: task.isMultiDay,
-                isRecurring: task.isRecurring,
-                hasSubtasks: task.hasSubtasks,
-                subtasksDone: task.completedSubtaskCount,
-                subtasksTotal: task.subtasks.length,
-                color: accentColor,
-              ),
-            ],
-            if (reorderable) ...[
-              const SizedBox(width: 4),
-              Icon(
-                Icons.drag_indicator,
-                size: 18,
-                color: AppSemanticColors.textFaint(context),
-              ),
-            ],
-          ],
-        ),
+          ),
+          if (subtasksExpanded && task.hasSubtasks)
+            _InlineSubtaskList(
+              subtasks: task.subtasks,
+              onToggle: onSubtaskToggle,
+            ),
+        ],
       ),
     );
   }
@@ -1176,6 +1359,103 @@ class _HomeTaskTile extends StatelessWidget {
 // ---------------------------------------------------------------------------
 // Shared bits
 // ---------------------------------------------------------------------------
+
+class _SubtaskCountBadge extends StatelessWidget {
+  const _SubtaskCountBadge({
+    required this.done,
+    required this.total,
+    required this.color,
+  });
+
+  final int done;
+  final int total;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.check_box_outlined, size: 10, color: color),
+          const SizedBox(width: 3),
+          Text(
+            '$done/$total',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InlineSubtaskList extends StatelessWidget {
+  const _InlineSubtaskList({
+    required this.subtasks,
+    required this.onToggle,
+  });
+
+  final List<SubTask> subtasks;
+  final ValueChanged<SubTask> onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: AppSemanticColors.subtleBorder(context)),
+        ),
+      ),
+      constraints: const BoxConstraints(maxHeight: 200),
+      child: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.fromLTRB(46, 4, 12, 8),
+        children: [
+          for (final s in subtasks)
+            InkWell(
+              onTap: () => onToggle(s),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  children: [
+                    _Checkbox(
+                      completed: s.completed,
+                      color: AppSemanticColors.successGreen,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        s.title,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: s.completed
+                              ? AppSemanticColors.textFaint(context)
+                              : AppSemanticColors.textStrong(context),
+                          decoration: s.completed
+                              ? TextDecoration.lineThrough
+                              : TextDecoration.none,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
 
 class _Checkbox extends StatelessWidget {
   const _Checkbox({required this.completed, required this.color});

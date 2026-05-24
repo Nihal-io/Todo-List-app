@@ -216,6 +216,9 @@ class Task {
   int get completedSubtaskCount =>
       subtasks.where((s) => s.completed).length;
 
+  bool get allSubtasksComplete =>
+      !hasSubtasks || completedSubtaskCount >= subtasks.length;
+
   bool isActiveOn(DateTime day) {
     final d = dateOnly(day);
     if (isRecurring) return recurrence!.appliesOn(d);

@@ -610,9 +610,9 @@ class _GridViewInfoCard extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   'Tasks auto-sort by urgency within each quadrant. '
-                  'Tap a title to edit; tap the checkbox to complete. '
-                  'Completed items stay crossed off until you leave and '
-                  'return to Grid View.',
+                  'Tap a task to complete; tap the arrow or long-press for '
+                  'details. Completed items stay crossed off until you leave '
+                  'and return to Grid View.',
                   style: TextStyle(
                     fontSize: 12,
                     height: 1.4,

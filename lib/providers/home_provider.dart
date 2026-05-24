@@ -9,6 +9,21 @@ import 'tasks_provider.dart';
 /// Home screen listens to this to apply deferred resorting.
 final homeRevisitSignalProvider = StateProvider<int>((ref) => 0);
 
+/// At most one Home list row shows an inline subtask checklist at a time.
+final expandedSubtaskTaskIdProvider =
+    NotifierProvider<ExpandedSubtaskTaskIdNotifier, String?>(
+  ExpandedSubtaskTaskIdNotifier.new,
+);
+
+class ExpandedSubtaskTaskIdNotifier extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void toggle(String id) => state = state == id ? null : id;
+
+  void collapse() => state = null;
+}
+
 /// Aggregated counts used by the Home dashboard's progress card.
 class TodayProgress {
   const TodayProgress({required this.done, required this.total});

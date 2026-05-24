@@ -9,8 +9,8 @@ import '../../providers/settings_provider.dart';
 import '../../providers/tasks_provider.dart';
 import '../../shared/widgets/task_detail_sheet.dart';
 import '../../shared/widgets/task_search_bar.dart';
+import '../../shared/widgets/task_snackbars.dart';
 import '../../theme/app_theme.dart';
-import '../calendar/add_item_sheet.dart';
 
 class MatrixScreen extends ConsumerStatefulWidget {
   const MatrixScreen({super.key});
@@ -59,23 +59,46 @@ class _MatrixScreenState extends ConsumerState<MatrixScreen> {
     return out;
   }
 
-  void _onTileToggle(
+  Future<void> _onTileToggle(
     MatrixQuadrant q,
     Task task,
     List<Task> displayed,
     DateTime today,
-  ) {
+  ) async {
     setState(() {
       _frozen[q] = displayed.map((t) => t.id).toList(growable: false);
     });
-    ref.read(tasksProvider.notifier).toggleForDay(
+    final actionDay = task.actionDayForRow(
+      today,
+      inUpcomingSection: task.isRecurring && !task.isActiveOn(today),
+    );
+    final result = await ref.read(tasksProvider.notifier).toggleForDay(
           task.id,
-          task.actionDayForRow(
-            today,
-            inUpcomingSection:
-                task.isRecurring && !task.isActiveOn(today),
-          ),
+          actionDay,
         );
+    if (!mounted) return;
+    switch (result) {
+      case TaskToggleResult.completed:
+        showTaskCompletedSnackBar(
+          context,
+          task: task,
+          day: actionDay,
+          recurring: task.isRecurring,
+        );
+      case TaskToggleResult.blockedSubtasks:
+        showSubtaskBlockedSnackBar(context);
+      case TaskToggleResult.uncompleted:
+      case TaskToggleResult.unchanged:
+        break;
+    }
+  }
+
+  Future<void> _openTaskOverview(Task task, DateTime today) async {
+    await showTaskDetailSheet(
+      context,
+      taskId: task.id,
+      referenceDay: today,
+    );
   }
 
   @override
@@ -111,12 +134,7 @@ class _MatrixScreenState extends ConsumerState<MatrixScreen> {
         showUrgencyBadges: settings.showGridUrgencyBadges,
         soonThresholdDays: settings.gridSoonThreshold.days,
         onToggle: (task) => _onTileToggle(q, task, tasks, today),
-        onOpen: (task) => showTaskDetailSheet(
-          context,
-          taskId: task.id,
-          referenceDay: today,
-        ),
-        onLongPress: (task) => showAddItemSheet(context, taskToEdit: task),
+        onOpen: (task) => _openTaskOverview(task, today),
       );
     }
 
@@ -371,7 +389,6 @@ class _QuadrantSection extends StatelessWidget {
     required this.soonThresholdDays,
     required this.onToggle,
     required this.onOpen,
-    required this.onLongPress,
   });
 
   final MatrixQuadrant quadrant;
@@ -384,7 +401,6 @@ class _QuadrantSection extends StatelessWidget {
   final int soonThresholdDays;
   final ValueChanged<Task> onToggle;
   final ValueChanged<Task> onOpen;
-  final ValueChanged<Task> onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -432,7 +448,6 @@ class _QuadrantSection extends StatelessWidget {
                         soonThresholdDays: soonThresholdDays,
                         onToggle: () => onToggle(task),
                         onOpen: () => onOpen(task),
-                        onLongPress: () => onLongPress(task),
                       );
                     },
                   ),
@@ -570,7 +585,6 @@ class _GridTaskTile extends StatelessWidget {
     required this.soonThresholdDays,
     required this.onToggle,
     required this.onOpen,
-    required this.onLongPress,
   });
 
   final Task task;
@@ -582,7 +596,6 @@ class _GridTaskTile extends StatelessWidget {
   final int soonThresholdDays;
   final VoidCallback onToggle;
   final VoidCallback onOpen;
-  final VoidCallback onLongPress;
 
   bool get _isCompleted {
     if (task.isEvent) return false;
@@ -644,45 +657,64 @@ class _GridTaskTile extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      GestureDetector(
-                        onTap: task.isEvent ? onOpen : onToggle,
-                        behavior: HitTestBehavior.opaque,
-                        child: Padding(
-                          padding: EdgeInsets.only(right: 8 * density),
-                          child: task.isEvent
-                              ? Icon(Icons.event,
-                                  size: 16 * density, color: accentColor)
-                              : _TileCheckbox(
-                                  completed: _isCompleted,
-                                  size: 16 * density,
-                                ),
-                        ),
-                      ),
                       Expanded(
                         child: InkWell(
-                          onTap: onOpen,
-                          onLongPress: onLongPress,
+                          onTap: task.isEvent ? onOpen : onToggle,
+                          onLongPress: onOpen,
                           borderRadius: BorderRadius.circular(6),
                           child: Padding(
-                            padding: EdgeInsets.symmetric(vertical: 2 * density),
-                            child: Text(
-                              task.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 12.5 * density.clamp(0.85, 1.0),
-                                fontWeight: FontWeight.w600,
-                                color: titleColor,
-                                decoration: _isCompleted
-                                    ? TextDecoration.lineThrough
-                                    : TextDecoration.none,
-                                decorationColor:
-                                    AppSemanticColors.textFaint(context),
-                              ),
+                            padding:
+                                EdgeInsets.symmetric(vertical: 2 * density),
+                            child: Row(
+                              children: [
+                                Padding(
+                                  padding:
+                                      EdgeInsets.only(right: 8 * density),
+                                  child: task.isEvent
+                                      ? Icon(Icons.event,
+                                          size: 16 * density,
+                                          color: accentColor)
+                                      : _TileCheckbox(
+                                          completed: _isCompleted,
+                                          size: 16 * density,
+                                        ),
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    task.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize:
+                                          12.5 * density.clamp(0.85, 1.0),
+                                      fontWeight: FontWeight.w600,
+                                      color: titleColor,
+                                      decoration: _isCompleted
+                                          ? TextDecoration.lineThrough
+                                          : TextDecoration.none,
+                                      decorationColor:
+                                          AppSemanticColors.textFaint(context),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
                       ),
+                      if (task.hasSubtasks)
+                        GestureDetector(
+                          onTap: onOpen,
+                          behavior: HitTestBehavior.opaque,
+                          child: Padding(
+                            padding: EdgeInsets.only(left: 4 * density),
+                            child: Icon(
+                              Icons.chevron_right,
+                              size: 18 * density,
+                              color: AppSemanticColors.textFaint(context),
+                            ),
+                          ),
+                        ),
                       if (urgency != null) ...[
                         SizedBox(width: 6 * density),
                         _UrgencyBadge(label: urgency),

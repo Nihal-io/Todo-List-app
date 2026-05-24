@@ -8,8 +8,8 @@ import '../../providers/settings_provider.dart';
 import '../../providers/tasks_provider.dart';
 import '../../shared/date_format.dart';
 import '../../shared/widgets/task_detail_sheet.dart';
+import '../../shared/widgets/task_snackbars.dart';
 import '../../theme/app_theme.dart';
-import 'add_item_sheet.dart';
 
 class CalendarScreen extends ConsumerStatefulWidget {
   const CalendarScreen({super.key});
@@ -384,6 +384,35 @@ class _DayPanel extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tasks = ref.watch(tasksForDayProvider(selectedDay));
 
+    Future<void> toggleTask(Task task) async {
+      final result = await ref
+          .read(tasksProvider.notifier)
+          .toggleForDay(task.id, selectedDay);
+      if (!context.mounted) return;
+      switch (result) {
+        case TaskToggleResult.completed:
+          showTaskCompletedSnackBar(
+            context,
+            task: task,
+            day: selectedDay,
+            recurring: task.isRecurring,
+          );
+        case TaskToggleResult.blockedSubtasks:
+          showSubtaskBlockedSnackBar(context);
+        case TaskToggleResult.uncompleted:
+        case TaskToggleResult.unchanged:
+          break;
+      }
+    }
+
+    Future<void> openOverview(Task task) async {
+      await showTaskDetailSheet(
+        context,
+        taskId: task.id,
+        referenceDay: selectedDay,
+      );
+    }
+
     if (tasks.isEmpty) {
       return Center(
         child: Column(
@@ -428,14 +457,8 @@ class _DayPanel extends ConsumerWidget {
           density: density,
           dateFormat: dateFormat,
           accentColor: colorFor(t),
-          onToggle: () =>
-              ref.read(tasksProvider.notifier).toggleForDay(t.id, selectedDay),
-          onOpen: () => showTaskDetailSheet(
-            context,
-            taskId: t.id,
-            referenceDay: selectedDay,
-          ),
-          onLongPress: () => showAddItemSheet(context, taskToEdit: t),
+          onToggle: () => toggleTask(t),
+          onOpen: () => openOverview(t),
         );
       },
     );
@@ -455,7 +478,6 @@ class _TaskTile extends StatelessWidget {
     required this.dateFormat,
     required this.accentColor,
     required this.onOpen,
-    required this.onLongPress,
   });
 
   final Task task;
@@ -465,7 +487,6 @@ class _TaskTile extends StatelessWidget {
   final DateFormatPref dateFormat;
   final Color accentColor;
   final VoidCallback onOpen;
-  final VoidCallback onLongPress;
 
   static const _weekdayShort = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
@@ -526,102 +547,122 @@ class _TaskTile extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            GestureDetector(
-              onTap: onToggle,
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: Container(
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: isDone
-                          ? AppSemanticColors.successGreen
-                          : AppSemanticColors.subtleBorder(context),
-                      width: 2,
-                    ),
-                    color: isDone
-                        ? AppSemanticColors.successGreen
-                        : Colors.transparent,
-                  ),
-                  child: isDone
-                      ? const Icon(Icons.check, size: 13, color: Colors.white)
-                      : null,
-                ),
-              ),
-            ),
             Expanded(
               child: InkWell(
-                onTap: onOpen,
-                onLongPress: onLongPress,
+                onTap: task.isEvent ? onOpen : onToggle,
+                onLongPress: onOpen,
                 borderRadius: BorderRadius.circular(8),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Row(
                     children: [
-                      Text(
-                        task.title,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: isDone
-                              ? AppSemanticColors.textFaint(context)
-                              : AppSemanticColors.textStrong(context),
-                          decoration: isDone
-                              ? TextDecoration.lineThrough
-                              : TextDecoration.none,
-                          decorationColor: AppSemanticColors.textFaint(context),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: task.isEvent
+                            ? Icon(Icons.event, size: 22, color: accentColor)
+                            : Container(
+                                width: 22,
+                                height: 22,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: isDone
+                                        ? AppSemanticColors.successGreen
+                                        : AppSemanticColors.subtleBorder(
+                                            context),
+                                    width: 2,
+                                  ),
+                                  color: isDone
+                                      ? AppSemanticColors.successGreen
+                                      : Colors.transparent,
+                                ),
+                                child: isDone
+                                    ? const Icon(Icons.check,
+                                        size: 13, color: Colors.white)
+                                    : null,
+                              ),
+                      ),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              task.title,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: isDone
+                                    ? AppSemanticColors.textFaint(context)
+                                    : AppSemanticColors.textStrong(context),
+                                decoration: isDone
+                                    ? TextDecoration.lineThrough
+                                    : TextDecoration.none,
+                                decorationColor:
+                                    AppSemanticColors.textFaint(context),
+                              ),
+                            ),
+                            if (subtitle != null) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                subtitle,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: AppSemanticColors.textFaint(context),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
-                      if (subtitle != null) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          subtitle,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppSemanticColors.textFaint(context),
-                          ),
-                        ),
-                      ],
                     ],
                   ),
                 ),
               ),
             ),
-            if (task.hasSubtasks) ...[
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: accentColor.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
+            if (task.hasSubtasks)
+              GestureDetector(
+                onTap: onOpen,
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 4),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.check_box_outlined,
-                          size: 11, color: accentColor),
-                      const SizedBox(width: 3),
-                      Text(
-                        '${task.completedSubtaskCount}/${task.subtasks.length}',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: accentColor,
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: accentColor.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(6),
                         ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.check_box_outlined,
+                                size: 11, color: accentColor),
+                            const SizedBox(width: 3),
+                            Text(
+                              '${task.completedSubtaskCount}/${task.subtasks.length}',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: accentColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        Icons.chevron_right,
+                        size: 20,
+                        color: AppSemanticColors.textFaint(context),
                       ),
                     ],
                   ),
                 ),
               ),
-            ],
             if (!task.isEvent) ...[
               const SizedBox(width: 4),
               Container(
