@@ -1,5 +1,5 @@
 name: todo_list
-description: "A new Flutter project."
+description: "A local-first todo app with Eisenhower matrix, auto sorting, and reminders."
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -27,6 +27,14 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/icon/icon.png
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: assets/icon/icon_foreground.png
 
 flutter:
   uses-material-design: true

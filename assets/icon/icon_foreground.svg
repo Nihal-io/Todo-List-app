@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">
+  <g stroke="#5C6BC0" stroke-width="48" stroke-linecap="round">
+    <!-- Item 1: checked -->
+    <circle cx="256" cy="320" r="72" fill="#5C6BC0" stroke="#5C6BC0"/>
+    <path d="M 220 320 L 248 348 L 292 292" stroke="#FFFFFF" stroke-width="36" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <line x1="380" y1="320" x2="768" y2="320"/>
+    <!-- Item 2 -->
+    <circle cx="256" cy="512" r="72" fill="none"/>
+    <line x1="380" y1="512" x2="768" y2="512"/>
+    <!-- Item 3 -->
+    <circle cx="256" cy="704" r="72" fill="none"/>
+    <line x1="380" y1="704" x2="640" y2="704"/>
+  </g>
+</svg>

@@ -1,17 +1,24 @@
-# todo_list
+# Todo Matrix
 
-A new Flutter project.
+A simple local-first todo app built with Flutter. Tasks live on your device — no account, no cloud sync.
 
-## Getting Started
+## Features
 
-This project is a starting point for a Flutter application.
+- **Eisenhower matrix** — sort tasks by urgency and importance
+- **Auto sorting** — home view keeps tasks ordered for you
+- **Calendar** — tasks and events on a day view
+- **Reminders** — scheduled and persistent notifications (Android)
+- **Offline** — everything stored locally
 
-A few resources to get you started if this is your first Flutter project:
+## Getting started
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+Requires [Flutter](https://docs.flutter.dev/get-started/install) 3.24+.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+flutter pub get
+flutter run
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
