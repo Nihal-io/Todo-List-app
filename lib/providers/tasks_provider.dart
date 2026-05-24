@@ -136,14 +136,17 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
   Future<List<Task>> build() async {
     _repo = ref.watch(taskRepositoryProvider);
     _notifications = ref.watch(notificationServiceProvider);
+    _notifications.onTaskReminderFired = _onTaskReminderFired;
     final loaded = await _repo.load();
     if (loaded == null) {
       final samples = buildSampleTasks();
       unawaited(_repo.save(samples));
       _rescheduleAll(samples);
+      unawaited(_syncForeground(samples));
       return samples;
     }
     _rescheduleAll(loaded);
+    unawaited(_syncForeground(loaded));
     return loaded;
   }
 
@@ -152,6 +155,39 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
   Future<void> _commit(List<Task> next) async {
     state = AsyncData(next);
     await _repo.save(next);
+    unawaited(_syncForeground(next));
+  }
+
+  Future<void> _syncForeground(List<Task> tasks) async {
+    if (!_notificationsEnabled) {
+      await _notifications.stopTodayForeground();
+      return;
+    }
+    await _notifications.updateTodayForeground(tasks);
+  }
+
+  void _onTaskReminderFired(String taskId) {
+    if (!_notificationsEnabled) return;
+    Task? task;
+    for (final t in _current) {
+      if (t.id == taskId) {
+        task = t;
+        break;
+      }
+    }
+    if (task == null) return;
+    unawaited(_notifications.scheduleForTask(task, enabled: true));
+    unawaited(_syncForeground(_current));
+  }
+
+  /// Rebuilds scheduled alarms and the foreground summary — e.g. on app resume.
+  Future<void> refreshNotifications() async {
+    if (!_notificationsEnabled) {
+      await _notifications.stopTodayForeground();
+      return;
+    }
+    _rescheduleAll(_current);
+    await _syncForeground(_current);
   }
 
   bool get _notificationsEnabled =>
@@ -159,9 +195,7 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
 
   void _rescheduleAll(List<Task> tasks) {
     if (!_notificationsEnabled) return;
-    for (final t in tasks) {
-      unawaited(_notifications.scheduleForTask(t, enabled: true));
-    }
+    unawaited(_notifications.scheduleRemindersForAll(tasks, enabled: true));
   }
 
   /// Replace all tasks with the canonical sample set.
@@ -175,9 +209,7 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
   Future<void> add(Task task) async {
     final next = [..._current, task];
     await _commit(next);
-    if (_notificationsEnabled) {
-      unawaited(_notifications.scheduleForTask(task, enabled: true));
-    }
+    _rescheduleAll(next);
   }
 
   /// Removes the task and returns it so the caller (e.g. an "Undo" SnackBar)
@@ -194,7 +226,7 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
     }
     if (removed == null) return null;
     await _commit(next);
-    unawaited(_notifications.cancelForTask(id));
+    _rescheduleAll(next);
     return removed;
   }
 
@@ -203,9 +235,7 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
     if (_current.any((t) => t.id == task.id)) return;
     final next = [..._current, task];
     await _commit(next);
-    if (_notificationsEnabled) {
-      unawaited(_notifications.scheduleForTask(task, enabled: true));
-    }
+    _rescheduleAll(next);
   }
 
   /// Toggle for non-recurring tasks and events (flips the single `completed`
@@ -222,13 +252,7 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
       }
     }
     await _commit(next);
-    if (updated != null) {
-      if (updated.completed) {
-        unawaited(_notifications.cancelForTask(updated.id));
-      } else if (_notificationsEnabled) {
-        unawaited(_notifications.scheduleForTask(updated, enabled: true));
-      }
-    }
+    _rescheduleAll(next);
   }
 
   /// Toggle completion for a specific day. Recurring tasks add/remove the day
@@ -259,13 +283,7 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
       next.add(updated);
     }
     await _commit(next);
-    if (updated != null && !updated.isRecurring) {
-      if (updated.completed) {
-        unawaited(_notifications.cancelForTask(updated.id));
-      } else if (_notificationsEnabled) {
-        unawaited(_notifications.scheduleForTask(updated, enabled: true));
-      }
-    }
+    _rescheduleAll(next);
   }
 
   Future<void> updateTask(Task task) async {
@@ -273,11 +291,7 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
       for (final t in _current) (t.id == task.id ? task : t),
     ];
     await _commit(next);
-    if (_notificationsEnabled) {
-      unawaited(_notifications.scheduleForTask(task, enabled: true));
-    } else {
-      unawaited(_notifications.cancelForTask(task.id));
-    }
+    _rescheduleAll(next);
   }
 
   /// Toggles a single subtask's completed state on its parent.
@@ -321,6 +335,7 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
       }
     }
     await _commit(next);
+    _rescheduleAll(next);
   }
 
   Future<List<Task>> bulkDelete(Set<String> ids) async {
@@ -334,9 +349,7 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
       }
     }
     await _commit(next);
-    for (final t in removed) {
-      unawaited(_notifications.cancelForTask(t.id));
-    }
+    _rescheduleAll(next);
     return removed;
   }
 
@@ -373,11 +386,11 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
   /// Toggle notifications on/off and re-schedule everything appropriately.
   Future<void> applyNotificationsEnabled(bool enabled) async {
     if (enabled) {
-      for (final t in _current) {
-        unawaited(_notifications.scheduleForTask(t, enabled: true));
-      }
+      await _notifications.scheduleRemindersForAll(_current, enabled: true);
+      await _syncForeground(_current);
     } else {
       await _notifications.cancelAll();
+      await _notifications.stopTodayForeground();
     }
   }
 }

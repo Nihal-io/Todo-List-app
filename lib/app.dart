@@ -7,6 +7,8 @@ import 'models/app_settings.dart';
 import 'providers/settings_provider.dart';
 import 'providers/tasks_provider.dart';
 import 'routing/router.dart';
+import 'shared/widgets/notification_lifecycle_sync.dart';
+import 'shared/widgets/notification_permission_listener.dart';
 import 'theme/app_theme.dart';
 
 class App extends ConsumerWidget {
@@ -28,6 +30,9 @@ class App extends ConsumerWidget {
         unawaited(ref
             .read(tasksProvider.notifier)
             .applyNotificationsEnabled(value.notificationsEnabled));
+        if (value.notificationsEnabled) {
+          unawaited(_ensureNotificationPermissions(ref));
+        }
       }
     });
 
@@ -60,16 +65,29 @@ class App extends ConsumerWidget {
           routerConfig: appRouter,
           builder: (context, child) {
             final mq = MediaQuery.of(context);
-            return MediaQuery(
-              data: mq.copyWith(
-                textScaler: TextScaler.linear(settings.textScale.scaleFactor),
+            return NotificationLifecycleSync(
+              child: NotificationPermissionListener(
+                child: MediaQuery(
+                  data: mq.copyWith(
+                    textScaler:
+                        TextScaler.linear(settings.textScale.scaleFactor),
+                  ),
+                  child: child ?? const SizedBox.shrink(),
+                ),
               ),
-              child: child ?? const SizedBox.shrink(),
             );
           },
         );
       },
     );
+  }
+}
+
+Future<void> _ensureNotificationPermissions(WidgetRef ref) async {
+  final service = ref.read(notificationServiceProvider);
+  final status = await service.ensurePermissions();
+  if (!status.allGranted) {
+    ref.read(notificationPermissionCheckProvider.notifier).state = status;
   }
 }
 

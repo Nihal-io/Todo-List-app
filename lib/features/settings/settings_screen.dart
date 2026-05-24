@@ -5,6 +5,7 @@ import '../../models/app_settings.dart';
 import '../../models/task.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/tasks_provider.dart';
+import '../../shared/widgets/notification_permission_listener.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/color_palettes.dart';
 
@@ -182,9 +183,12 @@ class SettingsScreen extends ConsumerWidget {
             value: settings.notificationsEnabled,
             onChanged: (v) async {
               await notifier.setNotificationsEnabled(v);
-              if (v) {
-                final service = ref.read(notificationServiceProvider);
-                await service.requestPermission();
+              if (!context.mounted || !v) return;
+              final service = ref.read(notificationServiceProvider);
+              final status = await service.ensurePermissions();
+              if (!context.mounted) return;
+              if (!status.allGranted) {
+                showNotificationPermissionSnackBar(context, status);
               }
             },
           ),

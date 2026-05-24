@@ -604,19 +604,10 @@ class _GridTaskTile extends StatelessWidget {
         : AppSemanticColors.subtleSurface(context);
 
     final tileBorder = highlightOverdue
-        ? Border(
-            left: BorderSide(color: accentColor, width: 3),
-            top: BorderSide(
-              color: AppSemanticColors.dangerRed.withValues(alpha: 0.35),
-            ),
-            right: BorderSide(
-              color: AppSemanticColors.dangerRed.withValues(alpha: 0.35),
-            ),
-            bottom: BorderSide(
-              color: AppSemanticColors.dangerRed.withValues(alpha: 0.35),
-            ),
+        ? Border.all(
+            color: AppSemanticColors.dangerRed.withValues(alpha: 0.35),
           )
-        : Border(left: BorderSide(color: accentColor, width: 3));
+        : null;
 
     final titleColor = _isCompleted
         ? AppSemanticColors.textFaint(context)
@@ -625,59 +616,73 @@ class _GridTaskTile extends StatelessWidget {
     final vPad = 7.0 * density;
     final hPad = 8.0 * density;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: tileColor,
-        borderRadius: BorderRadius.circular(10),
-        border: tileBorder,
-      ),
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(hPad, vPad, hPad, vPad),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            GestureDetector(
-              onTap: task.isEvent ? onOpen : onToggle,
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: EdgeInsets.only(right: 8 * density),
-                child: task.isEvent
-                    ? Icon(Icons.event, size: 16 * density, color: accentColor)
-                    : _TileCheckbox(
-                        completed: _isCompleted,
-                        size: 16 * density,
-                      ),
-              ),
-            ),
-            Expanded(
-              child: InkWell(
-                onTap: onOpen,
-                onLongPress: onLongPress,
-                borderRadius: BorderRadius.circular(6),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        decoration: BoxDecoration(
+          color: tileColor,
+          border: tileBorder,
+        ),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(width: 3, color: accentColor),
+              Expanded(
                 child: Padding(
-                  padding: EdgeInsets.symmetric(vertical: 2 * density),
-                  child: Text(
-                    task.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12.5 * density.clamp(0.85, 1.0),
-                      fontWeight: FontWeight.w600,
-                      color: titleColor,
-                      decoration: _isCompleted
-                          ? TextDecoration.lineThrough
-                          : TextDecoration.none,
-                      decorationColor: AppSemanticColors.textFaint(context),
-                    ),
+                  padding: EdgeInsets.fromLTRB(hPad, vPad, hPad, vPad),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      GestureDetector(
+                        onTap: task.isEvent ? onOpen : onToggle,
+                        behavior: HitTestBehavior.opaque,
+                        child: Padding(
+                          padding: EdgeInsets.only(right: 8 * density),
+                          child: task.isEvent
+                              ? Icon(Icons.event,
+                                  size: 16 * density, color: accentColor)
+                              : _TileCheckbox(
+                                  completed: _isCompleted,
+                                  size: 16 * density,
+                                ),
+                        ),
+                      ),
+                      Expanded(
+                        child: InkWell(
+                          onTap: onOpen,
+                          onLongPress: onLongPress,
+                          borderRadius: BorderRadius.circular(6),
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(vertical: 2 * density),
+                            child: Text(
+                              task.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12.5 * density.clamp(0.85, 1.0),
+                                fontWeight: FontWeight.w600,
+                                color: titleColor,
+                                decoration: _isCompleted
+                                    ? TextDecoration.lineThrough
+                                    : TextDecoration.none,
+                                decorationColor:
+                                    AppSemanticColors.textFaint(context),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (urgency != null) ...[
+                        SizedBox(width: 6 * density),
+                        _UrgencyBadge(label: urgency),
+                      ],
+                    ],
                   ),
                 ),
               ),
-            ),
-            if (urgency != null) ...[
-              SizedBox(width: 6 * density),
-              _UrgencyBadge(label: urgency),
             ],
-          ],
+          ),
         ),
       ),
     );

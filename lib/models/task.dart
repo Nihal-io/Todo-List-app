@@ -256,14 +256,13 @@ class Task {
     return dateOnly(day).isAfter(due);
   }
 
-  /// The next day after [after] when this task occurs, or null if none.
+  /// The next calendar day on or after [after] when this task occurs, or null.
   DateTime? nextOccurrenceAfter(DateTime after) {
     final afterDay = dateOnly(after);
     if (isRecurring) {
-      var cursor = afterDay.add(const Duration(days: 1));
       final untilDay =
           recurrence!.until != null ? dateOnly(recurrence!.until!) : null;
-      // Search up to ~2 years ahead.
+      var cursor = afterDay;
       for (var i = 0; i < 730; i++) {
         if (untilDay != null && cursor.isAfter(untilDay)) return null;
         if (recurrence!.appliesOn(cursor)) return cursor;
@@ -272,7 +271,7 @@ class Task {
       return null;
     }
     final start = dateOnly(startDate);
-    if (start.isAfter(afterDay)) return start;
+    if (!start.isBefore(afterDay)) return start;
     return null;
   }
 
@@ -287,23 +286,56 @@ class Task {
   }
 
   /// When this task next "fires" for a reminder, or null if it never does.
-  /// For non-recurring tasks this is the start moment (with [startTime] if
-  /// set, else 9:00 AM on [startDate]); recurring tasks return the next
-  /// occurrence after [after] at the same time.
+  ///
+  /// Uses [startTime] when set, otherwise 9:00 AM. Overdue one-off tasks nudge
+  /// on the current day; recurring tasks skip days already completed.
   DateTime? nextReminderAfter(DateTime after) {
-    DateTime? day;
+    if (isEvent && autoCompletedOn(dateOnly(after))) return null;
+    if (!isRecurring && completed) return null;
+
+    final afterDay = dateOnly(after);
+    final reminderTime = startTime;
+    final hour = reminderTime?.hour ?? 9;
+    final minute = reminderTime?.minute ?? 0;
+
+    DateTime atTime(DateTime day) =>
+        DateTime(day.year, day.month, day.day, hour, minute);
+
     if (isRecurring) {
-      day = nextOccurrenceAfter(after);
+      if (isCompletedOn(afterDay)) {
+        final nextDay = nextOccurrenceAfter(
+          afterDay.add(const Duration(days: 1)),
+        );
+        return nextDay == null ? null : atTime(nextDay);
+      }
+      final day = nextOccurrenceAfter(after);
       if (day == null) return null;
-    } else {
-      final s = dateOnly(startDate);
-      if (s.isBefore(dateOnly(after))) return null;
-      day = s;
+      final candidate = atTime(day);
+      if (candidate.isAfter(after)) return candidate;
+      return after.add(const Duration(minutes: 1));
     }
-    final t = startTime;
-    final hour = t?.hour ?? 9;
-    final minute = t?.minute ?? 0;
-    return DateTime(day.year, day.month, day.day, hour, minute);
+
+    final start = dateOnly(startDate);
+    final end = dateOnly(endDate ?? startDate);
+
+    // Active today (including overdue within a multi-day span).
+    if (!afterDay.isBefore(start) && !afterDay.isAfter(end)) {
+      final candidate = atTime(afterDay);
+      if (candidate.isAfter(after)) return candidate;
+      return after.add(const Duration(minutes: 1));
+    }
+
+    // Future one-off / event.
+    if (start.isAfter(afterDay)) return atTime(start);
+
+    // Past deadline but still incomplete — daily nudge at default time.
+    if (afterDay.isAfter(end)) {
+      final candidate = atTime(afterDay);
+      if (candidate.isAfter(after)) return candidate;
+      return after.add(const Duration(minutes: 1));
+    }
+
+    return null;
   }
 
   Task copyWith({
