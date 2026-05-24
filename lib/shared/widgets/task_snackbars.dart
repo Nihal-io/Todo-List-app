@@ -60,6 +60,37 @@ void showSubtaskBlockedSnackBar(BuildContext context) {
   );
 }
 
+/// Confirms with the user, then deletes the task. No snackbar — the dialog
+/// itself is the safety net.
+Future<void> confirmAndDeleteTask(
+  BuildContext context,
+  WidgetRef ref,
+  Task task,
+) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Delete task?'),
+      content: Text('Remove "${task.title}"?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          style: TextButton.styleFrom(
+            foregroundColor: Theme.of(ctx).colorScheme.error,
+          ),
+          child: const Text('Delete'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return;
+  await ref.read(tasksProvider.notifier).remove(task.id);
+}
+
 void showSubtaskAutoCompletedSnackBar(
   BuildContext context, {
   required Task task,

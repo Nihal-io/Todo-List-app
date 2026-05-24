@@ -13,6 +13,8 @@ import '../../shared/widgets/task_snackbars.dart';
 import '../../shared/widgets/task_streak_badge.dart';
 import '../../theme/app_theme.dart';
 
+enum _MatrixAction { toggleEditMode }
+
 class MatrixScreen extends ConsumerStatefulWidget {
   const MatrixScreen({super.key});
 
@@ -27,7 +29,18 @@ class _MatrixScreenState extends ConsumerState<MatrixScreen> {
   /// user revisits the tab and the snapshot is cleared.
   final Map<MatrixQuadrant, List<String>> _frozen = {};
 
+  /// When true, tap on a tile opens the detail sheet instead of toggling
+  /// completion. Long-press still drags. Session-local.
+  bool _editMode = false;
+
   void _clearFrozen() => _frozen.clear();
+
+  void _handleAction(_MatrixAction action) {
+    switch (action) {
+      case _MatrixAction.toggleEditMode:
+        setState(() => _editMode = !_editMode);
+    }
+  }
 
   @override
   void reassemble() {
@@ -104,6 +117,7 @@ class _MatrixScreenState extends ConsumerState<MatrixScreen> {
       context,
       taskId: task.id,
       referenceDay: today,
+      onDelete: () => confirmAndDeleteTask(context, ref, task),
     );
   }
 
@@ -139,6 +153,7 @@ class _MatrixScreenState extends ConsumerState<MatrixScreen> {
         showOverdueHighlight: settings.showGridOverdueHighlight,
         showUrgencyBadges: settings.showGridUrgencyBadges,
         soonThresholdDays: settings.gridSoonThreshold.days,
+        editMode: _editMode,
         onToggle: (task) => _onTileToggle(q, task, tasks, today),
         onOpen: (task) => _openTaskOverview(task, today),
         onMoveTask: (task) => _onMoveTask(task, q),
@@ -157,12 +172,30 @@ class _MatrixScreenState extends ConsumerState<MatrixScreen> {
             onPressed: () =>
                 ref.read(searchBarOpenProvider.notifier).state = !searchOpen,
           ),
+          PopupMenuButton<_MatrixAction>(
+            tooltip: 'More',
+            onSelected: _handleAction,
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: _MatrixAction.toggleEditMode,
+                child: Row(
+                  children: [
+                    Icon(_editMode ? Icons.check : Icons.edit_outlined,
+                        size: 18),
+                    const SizedBox(width: 10),
+                    Text(_editMode ? 'Edit mode: ON' : 'Edit mode'),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(44),
           child: _GridSummaryBar(
             openCount: openCount,
             overdueCount: overdueCount,
+            editMode: _editMode,
           ),
         ),
       ),
@@ -226,10 +259,12 @@ class _GridSummaryBar extends StatelessWidget {
   const _GridSummaryBar({
     required this.openCount,
     required this.overdueCount,
+    required this.editMode,
   });
 
   final int openCount;
   final int overdueCount;
+  final bool editMode;
 
   @override
   Widget build(BuildContext context) {
@@ -281,10 +316,15 @@ class _GridSummaryBar extends StatelessWidget {
           ],
           const Spacer(),
           Text(
-            'Auto-sorted by urgency',
+            editMode
+                ? 'Edit mode — tap a task to open it'
+                : 'Auto-sorted by urgency',
             style: TextStyle(
               fontSize: 11,
-              color: AppSemanticColors.textFaint(context),
+              fontWeight: editMode ? FontWeight.w600 : FontWeight.normal,
+              color: editMode
+                  ? Theme.of(context).colorScheme.primary
+                  : AppSemanticColors.textFaint(context),
             ),
           ),
         ],
@@ -394,6 +434,7 @@ class _QuadrantSection extends StatelessWidget {
     required this.showOverdueHighlight,
     required this.showUrgencyBadges,
     required this.soonThresholdDays,
+    required this.editMode,
     required this.onToggle,
     required this.onOpen,
     required this.onMoveTask,
@@ -407,6 +448,7 @@ class _QuadrantSection extends StatelessWidget {
   final bool showOverdueHighlight;
   final bool showUrgencyBadges;
   final int soonThresholdDays;
+  final bool editMode;
   final ValueChanged<Task> onToggle;
   final ValueChanged<Task> onOpen;
   final ValueChanged<Task> onMoveTask;
@@ -465,6 +507,7 @@ class _QuadrantSection extends StatelessWidget {
                             showOverdueHighlight: showOverdueHighlight,
                             showUrgencyBadges: showUrgencyBadges,
                             soonThresholdDays: soonThresholdDays,
+                            editMode: editMode,
                             onToggle: () => onToggle(task),
                             onOpen: () => onOpen(task),
                           );
@@ -619,6 +662,7 @@ class _GridTaskTile extends StatelessWidget {
     required this.showOverdueHighlight,
     required this.showUrgencyBadges,
     required this.soonThresholdDays,
+    required this.editMode,
     required this.onToggle,
     required this.onOpen,
   });
@@ -630,6 +674,7 @@ class _GridTaskTile extends StatelessWidget {
   final bool showOverdueHighlight;
   final bool showUrgencyBadges;
   final int soonThresholdDays;
+  final bool editMode;
   final VoidCallback onToggle;
   final VoidCallback onOpen;
 
@@ -695,7 +740,9 @@ class _GridTaskTile extends StatelessWidget {
                     children: [
                       Expanded(
                         child: InkWell(
-                          onTap: task.isEvent ? onOpen : onToggle,
+                          onTap: editMode
+                              ? onOpen
+                              : (task.isEvent ? onOpen : onToggle),
                           borderRadius: BorderRadius.circular(6),
                           child: Padding(
                             padding:

@@ -180,7 +180,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       context,
       taskId: task.id,
       referenceDay: today,
-      onDelete: () => _deleteWithUndo(task),
+      onDelete: () => confirmAndDeleteTask(context, ref, task),
     );
   }
 
@@ -288,25 +288,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     await _freezeAndToggleOverdue(task, displayed);
   }
 
-  Future<void> _deleteWithUndo(Task task) async {
-    final removed = await ref.read(tasksProvider.notifier).remove(task.id);
-    if (removed == null) return;
-    if (!mounted) return;
-    if (!context.mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.clearSnackBars();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text('Deleted "${removed.title}"'),
-        duration: const Duration(seconds: 5),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: () => ref.read(tasksProvider.notifier).restore(removed),
-        ),
-      ),
-    );
-  }
-
   void _onReorderCurrent(List<Task> displayed, int oldIndex, int newIndex) {
     if (newIndex > oldIndex) newIndex -= 1;
     final list = [...displayed];
@@ -362,28 +343,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ref.read(selectionProvider.notifier).exit();
               },
               onDelete: () async {
-                final removed = await ref
+                await ref
                     .read(tasksProvider.notifier)
                     .bulkDelete(selection.ids);
                 ref.read(selectionProvider.notifier).exit();
-                if (!context.mounted) return;
-                final messenger = ScaffoldMessenger.of(context);
-                messenger.clearSnackBars();
-                messenger.showSnackBar(
-                  SnackBar(
-                    content: Text(
-                        'Deleted ${removed.length} ${removed.length == 1 ? 'task' : 'tasks'}'),
-                    duration: const Duration(seconds: 5),
-                    action: SnackBarAction(
-                      label: 'Undo',
-                      onPressed: () {
-                        for (final t in removed) {
-                          ref.read(tasksProvider.notifier).restore(t);
-                        }
-                      },
-                    ),
-                  ),
-                );
               },
               onChangeQuadrant: (q) async {
                 await ref
@@ -1407,6 +1370,19 @@ class _HomeTaskTile extends StatelessWidget {
                                   color: AppSemanticColors.textFaint(context),
                                 ),
                               ),
+                              if (task.notes.trim().isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  task.notes.trim().split('\n').first,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color:
+                                        AppSemanticColors.textFaint(context),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),

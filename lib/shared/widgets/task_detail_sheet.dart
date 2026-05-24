@@ -22,7 +22,7 @@ Future<void> showTaskDetailSheet(
   BuildContext context, {
   required String taskId,
   DateTime? referenceDay,
-  Future<void> Function()? onDelete,
+  required Future<void> Function() onDelete,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -31,7 +31,7 @@ Future<void> showTaskDetailSheet(
     builder: (_) => _TaskDetailSheet(
       taskId: taskId,
       referenceDay: referenceDay,
-      onDeleteOverride: onDelete,
+      onDelete: onDelete,
     ),
   );
 }
@@ -40,12 +40,12 @@ class _TaskDetailSheet extends ConsumerWidget {
   const _TaskDetailSheet({
     required this.taskId,
     this.referenceDay,
-    this.onDeleteOverride,
+    required this.onDelete,
   });
 
   final String taskId;
   final DateTime? referenceDay;
-  final Future<void> Function()? onDeleteOverride;
+  final Future<void> Function() onDelete;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -184,11 +184,7 @@ class _TaskDetailSheet extends ConsumerWidget {
                     child: OutlinedButton.icon(
                       onPressed: () async {
                         Navigator.of(context).pop();
-                        if (onDeleteOverride != null) {
-                          await onDeleteOverride!();
-                        } else {
-                          await _confirmAndDelete(context, ref, activeTask);
-                        }
+                        await onDelete();
                       },
                       icon: Icon(Icons.delete_outline,
                           color: theme.colorScheme.error),
@@ -233,31 +229,6 @@ class _TaskDetailSheet extends ConsumerWidget {
     );
   }
 
-  Future<void> _confirmAndDelete(
-      BuildContext context, WidgetRef ref, Task task) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete task?'),
-        content: Text('Remove "${task.title}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(ctx).colorScheme.error,
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    await ref.read(tasksProvider.notifier).remove(task.id);
-  }
 }
 
 class _Header extends StatelessWidget {

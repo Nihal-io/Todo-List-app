@@ -418,6 +418,7 @@ class _DayPanel extends ConsumerWidget {
         context,
         taskId: task.id,
         referenceDay: selectedDay,
+        onDelete: () => confirmAndDeleteTask(context, ref, task),
       );
     }
 
@@ -668,6 +669,19 @@ class _TaskTile extends StatelessWidget {
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: AppSemanticColors.textFaint(context),
+                                  ),
+                                ),
+                              ],
+                              if (task.notes.trim().isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  task.notes.trim().split('\n').first,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color:
+                                        AppSemanticColors.textFaint(context),
                                   ),
                                 ),
                               ],
