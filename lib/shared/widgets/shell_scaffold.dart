@@ -39,6 +39,8 @@ class ShellScaffold extends ConsumerWidget {
     final int currentIndex = navigationShell.currentIndex;
 
     return Scaffold(
+      // Keep FAB + bottom bar fixed when a tab's search field opens the keyboard.
+      resizeToAvoidBottomInset: false,
       body: navigationShell,
       floatingActionButton: FloatingActionButton(
         onPressed: () {
