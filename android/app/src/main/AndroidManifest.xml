@@ -40,7 +40,14 @@
             android:name="com.dexterous.flutterlocalnotifications.ForegroundService"
             android:exported="false"
             android:foregroundServiceType="specialUse"
-            android:stopWithTask="false"/>
+            android:stopWithTask="false">
+            <!-- Required when targeting Android 14+ (API 34) for specialUse
+                 foreground services. Surfaces what the persistent notification
+                 is for; without this, startForegroundService can throw. -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the user's pending task reminders alive and shows what is due today." />
+        </service>
         <receiver
             android:exported="false"
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
