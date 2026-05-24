@@ -249,6 +249,30 @@ class Task {
     return completed;
   }
 
+  /// Calendar day a list row should toggle/display when acting from [contextDay].
+  ///
+  /// Recurring tasks in an upcoming-style context (Home → Upcoming, or Grid
+  /// when not active today) target their next occurrence, not [contextDay].
+  DateTime actionDayForRow(
+    DateTime contextDay, {
+    required bool inUpcomingSection,
+  }) {
+    final d = dateOnly(contextDay);
+    if (isRecurring && (inUpcomingSection || !isActiveOn(d))) {
+      return dateOnly(nextOccurrenceAfter(d) ?? d);
+    }
+    return d;
+  }
+
+  bool isRowDoneOnDate(
+    DateTime contextDay, {
+    required bool inUpcomingSection,
+  }) {
+    return isCompletedOn(
+      actionDayForRow(contextDay, inUpcomingSection: inUpcomingSection),
+    );
+  }
+
   bool isOverdueOn(DateTime day) {
     if (isEvent || isRecurring) return false;
     if (completed) return false;

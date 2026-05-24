@@ -68,7 +68,14 @@ class _MatrixScreenState extends ConsumerState<MatrixScreen> {
     setState(() {
       _frozen[q] = displayed.map((t) => t.id).toList(growable: false);
     });
-    ref.read(tasksProvider.notifier).toggleForDay(task.id, today);
+    ref.read(tasksProvider.notifier).toggleForDay(
+          task.id,
+          task.actionDayForRow(
+            today,
+            inUpcomingSection:
+                task.isRecurring && !task.isActiveOn(today),
+          ),
+        );
   }
 
   @override
@@ -579,7 +586,10 @@ class _GridTaskTile extends StatelessWidget {
 
   bool get _isCompleted {
     if (task.isEvent) return false;
-    return task.isCompletedOn(today);
+    return task.isRowDoneOnDate(
+      today,
+      inUpcomingSection: task.isRecurring && !task.isActiveOn(today),
+    );
   }
 
   bool get _isOverdue {

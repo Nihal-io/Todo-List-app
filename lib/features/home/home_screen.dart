@@ -113,10 +113,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _sortUpcoming = false;
     });
     if (task.isRecurring) {
-      final nextDay = task.nextOccurrenceAfter(today);
-      if (nextDay != null) {
-        ref.read(tasksProvider.notifier).toggleForDay(task.id, nextDay);
-      }
+      final day = task.actionDayForRow(today, inUpcomingSection: true);
+      ref.read(tasksProvider.notifier).toggleForDay(task.id, day);
     } else {
       ref.read(tasksProvider.notifier).toggle(task.id);
     }
@@ -1040,7 +1038,8 @@ class _HomeTaskTile extends StatelessWidget {
 
   static const _weekdayShort = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
-  bool get _isDone => task.isCompletedOn(referenceDay);
+  bool get _isDone =>
+      task.isRowDoneOnDate(referenceDay, inUpcomingSection: upcoming);
 
   String get _dateLabel {
     if (upcoming && task.isRecurring) {

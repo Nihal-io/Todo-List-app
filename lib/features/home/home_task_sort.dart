@@ -46,7 +46,7 @@ int compareUpcomingTasks(Task a, Task b, DateTime today) =>
     compareHomeTasks(
       a,
       b,
-      isDone: (t) => !t.isRecurring && t.isCompletedOn(today),
+      isDone: (t) => t.isRowDoneOnDate(today, inUpcomingSection: true),
       tieBreak: (x, y) => _tieBreakByKind(x, y, today),
     );
 
