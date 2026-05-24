@@ -8,6 +8,7 @@ import '../../providers/selected_day_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/tasks_provider.dart';
 import '../../shared/date_format.dart';
+import '../../shared/widgets/task_streak_badge.dart';
 import '../../theme/app_theme.dart';
 
 const _uuid = Uuid();
@@ -396,6 +397,16 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
                       ),
                     ),
                   ),
+                  if (_isEditing &&
+                      _isRecurring &&
+                      widget.taskToEdit != null) ...[
+                    TaskStreakBadge(
+                      taskId: widget.taskToEdit!.id,
+                      color: quadrantColors[_quadrant] ?? _quadrant.color,
+                      size: 24,
+                    ),
+                    const SizedBox(width: 4),
+                  ],
                   if (_isEditing)
                     IconButton(
                       icon: Icon(Icons.delete_outline,

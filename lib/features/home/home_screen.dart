@@ -15,6 +15,7 @@ import '../../shared/date_format.dart';
 import '../../shared/widgets/task_detail_sheet.dart';
 import '../../shared/widgets/task_search_bar.dart';
 import '../../shared/widgets/task_snackbars.dart';
+import '../../shared/widgets/task_streak_badge.dart';
 import '../../theme/app_theme.dart';
 import 'home_task_sort.dart';
 
@@ -974,6 +975,13 @@ class _OverdueTile extends StatelessWidget {
                             ],
                           ),
                         ),
+                        if (task.isRecurring) ...[
+                          TaskStreakBadge(
+                            taskId: task.id,
+                            color: statusColor,
+                          ),
+                          const SizedBox(width: 4),
+                        ],
                         if (task.hasSubtasks) ...[
                           _SubtaskCountBadge(
                             done: task.completedSubtaskCount,
@@ -1403,6 +1411,13 @@ class _HomeTaskTile extends StatelessWidget {
                           ),
                         ),
                         if (!task.isEvent) ...[
+                          if (task.isRecurring) ...[
+                            TaskStreakBadge(
+                              taskId: task.id,
+                              color: accentColor,
+                            ),
+                            const SizedBox(width: 4),
+                          ],
                           if (task.hasSubtasks) ...[
                             _SubtaskCountBadge(
                               done: task.completedSubtaskCount,

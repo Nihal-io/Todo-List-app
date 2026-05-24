@@ -10,6 +10,7 @@ import '../../providers/tasks_provider.dart';
 import '../../shared/date_format.dart';
 import '../../theme/app_theme.dart';
 import 'task_snackbars.dart';
+import 'task_streak_badge.dart';
 
 /// Shows a compact, read-mostly view of a task as a bottom sheet. Surfaces
 /// the title, quadrant, dates, notes, and an interactive subtask checklist.
@@ -111,6 +112,7 @@ class _TaskDetailSheet extends ConsumerWidget {
                 accent: accent,
                 completed: done,
                 showCompleteToggle: !activeTask.isEvent,
+                streak: streak,
                 onToggleComplete: () async {
                   final result = await ref
                       .read(tasksProvider.notifier)
@@ -264,6 +266,7 @@ class _Header extends StatelessWidget {
     required this.accent,
     required this.completed,
     required this.showCompleteToggle,
+    required this.streak,
     required this.onToggleComplete,
     required this.onClose,
   });
@@ -272,6 +275,7 @@ class _Header extends StatelessWidget {
   final Color accent;
   final bool completed;
   final bool showCompleteToggle;
+  final TaskStreak? streak;
   final VoidCallback onToggleComplete;
   final VoidCallback onClose;
 
@@ -344,6 +348,10 @@ class _Header extends StatelessWidget {
             ],
           ),
         ),
+        if (streak != null) ...[
+          const SizedBox(width: 6),
+          TaskStreakBadge(taskId: task.id, color: accent, size: 24),
+        ],
         IconButton(
           onPressed: onClose,
           icon: const Icon(Icons.close),
@@ -518,13 +526,13 @@ class _NotesBlock extends StatelessWidget {
 
 class _StreakBlock extends StatelessWidget {
   const _StreakBlock({required this.streak, required this.accent});
-  final dynamic streak;
+  final TaskStreak streak;
   final Color accent;
 
   @override
   Widget build(BuildContext context) {
-    final current = streak.current as int;
-    final best = streak.best as int;
+    final current = streak.current;
+    final best = streak.best;
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(

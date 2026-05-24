@@ -10,6 +10,7 @@ import '../../providers/tasks_provider.dart';
 import '../../shared/date_format.dart';
 import '../../shared/widgets/task_detail_sheet.dart';
 import '../../shared/widgets/task_snackbars.dart';
+import '../../shared/widgets/task_streak_badge.dart';
 import '../../theme/app_theme.dart';
 
 class CalendarScreen extends ConsumerStatefulWidget {
@@ -674,6 +675,13 @@ class _TaskTile extends StatelessWidget {
                           ),
                         ),
                         if (!task.isEvent) ...[
+                          if (task.isRecurring) ...[
+                            TaskStreakBadge(
+                              taskId: task.id,
+                              color: accentColor,
+                            ),
+                            const SizedBox(width: 4),
+                          ],
                           if (task.hasSubtasks) ...[
                             _CalendarSubtaskCountBadge(
                               done: task.completedSubtaskCount,

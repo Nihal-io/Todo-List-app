@@ -10,6 +10,7 @@ import '../../providers/tasks_provider.dart';
 import '../../shared/widgets/task_detail_sheet.dart';
 import '../../shared/widgets/task_search_bar.dart';
 import '../../shared/widgets/task_snackbars.dart';
+import '../../shared/widgets/task_streak_badge.dart';
 import '../../theme/app_theme.dart';
 
 class MatrixScreen extends ConsumerStatefulWidget {
@@ -734,6 +735,14 @@ class _GridTaskTile extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (task.isRecurring) ...[
+                        SizedBox(width: 4 * density),
+                        TaskStreakBadge(
+                          taskId: task.id,
+                          color: accentColor,
+                          size: 18 * density,
+                        ),
+                      ],
                       if (task.hasSubtasks)
                         GestureDetector(
                           onTap: onOpen,
