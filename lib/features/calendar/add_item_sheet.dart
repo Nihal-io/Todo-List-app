@@ -89,8 +89,7 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
         _repeatForever = task.recurrence!.until == null;
       }
     } else {
-      _startDate =
-          widget.initialDate ?? ref.read(selectedCalendarDayProvider);
+      _startDate = widget.initialDate ?? ref.read(selectedCalendarDayProvider);
     }
   }
 
@@ -218,8 +217,7 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
     });
   }
 
-  void _removeSubtask(int index) =>
-      setState(() => _subtasks.removeAt(index));
+  void _removeSubtask(int index) => setState(() => _subtasks.removeAt(index));
 
   void _editSubtaskTitle(int index, String value) {
     setState(() {
@@ -617,8 +615,8 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
                         ),
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12)),
-                        contentPadding:
-                            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
                       ),
                     ),
                   ),
@@ -638,15 +636,15 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
                   foregroundColor: Colors.white,
                   disabledBackgroundColor:
                       AppSemanticColors.subtleBorder(context),
-                  disabledForegroundColor:
-                      AppSemanticColors.textFaint(context),
+                  disabledForegroundColor: AppSemanticColors.textFaint(context),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
                 child: Text(
                   _isEditing ? 'Save' : 'Add',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ),
             ],

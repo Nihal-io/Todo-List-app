@@ -118,9 +118,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Future<void> _freezeAndToggleCurrent(
       Task task, List<Task> displayed, DateTime today) async {
     setState(() => _freezeListOrder(_HomeListSection.current, displayed));
-    final result = await ref
-        .read(tasksProvider.notifier)
-        .toggleForDay(task.id, today);
+    final result =
+        await ref.read(tasksProvider.notifier).toggleForDay(task.id, today);
     if (!mounted) return;
     _handleToggleResult(task, today, result, recurring: task.isRecurring);
   }
@@ -128,8 +127,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Future<void> _freezeAndToggleUpcoming(
       Task task, List<Task> displayed, DateTime today) async {
     setState(() => _freezeListOrder(_HomeListSection.upcoming, displayed));
-    final actionDay =
-        task.actionDayForRow(today, inUpcomingSection: true);
+    final actionDay = task.actionDayForRow(today, inUpcomingSection: true);
     final TaskToggleResult result;
     if (task.isRecurring) {
       result = await ref
@@ -147,8 +145,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Future<void> _freezeAndToggleOverdue(
-      Task task, List<Task> displayed) async {
+  Future<void> _freezeAndToggleOverdue(Task task, List<Task> displayed) async {
     setState(() => _freezeListOrder(_HomeListSection.overdue, displayed));
     final result = await ref.read(tasksProvider.notifier).toggle(task.id);
     if (!mounted) return;
@@ -226,8 +223,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     required bool upcoming,
   }) async {
     setState(() => _freezeListOrder(section, displayed));
-    final actionDay =
-        task.actionDayForRow(today, inUpcomingSection: upcoming);
+    final actionDay = task.actionDayForRow(today, inUpcomingSection: upcoming);
     final result = await ref.read(tasksProvider.notifier).toggleSubtask(
           task.id,
           subtask.id,
@@ -253,8 +249,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     required bool upcoming,
   }) async {
     setState(() => _freezeListOrder(section, displayed));
-    final actionDay =
-        task.actionDayForRow(today, inUpcomingSection: upcoming);
+    final actionDay = task.actionDayForRow(today, inUpcomingSection: upcoming);
     final result = await ref
         .read(tasksProvider.notifier)
         .toggleAllSubtasks(task.id, actionDay: actionDay);

@@ -53,7 +53,8 @@ class ShellScaffold extends ConsumerWidget {
                   DateTime.now().month,
                   DateTime.now().day,
                 );
-          final created = await showAddItemSheet(context, initialDate: initialDate);
+          final created =
+              await showAddItemSheet(context, initialDate: initialDate);
           if (created != null && context.mounted) {
             showTaskCreatedSnackBar(context, created);
           }

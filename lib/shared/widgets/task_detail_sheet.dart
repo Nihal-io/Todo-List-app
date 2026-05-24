@@ -152,13 +152,12 @@ class _TaskDetailSheet extends ConsumerWidget {
                 _SubtaskList(
                   task: activeTask,
                   onToggle: (s) async {
-                    final result = await ref
-                        .read(tasksProvider.notifier)
-                        .toggleSubtask(
-                          activeTask.id,
-                          s.id,
-                          actionDay: referenceDate,
-                        );
+                    final result =
+                        await ref.read(tasksProvider.notifier).toggleSubtask(
+                              activeTask.id,
+                              s.id,
+                              actionDay: referenceDate,
+                            );
                     if (!context.mounted) return;
                     if (result.parentAutoCompleted) {
                       showSubtaskAutoCompletedSnackBar(
@@ -642,9 +641,8 @@ class _SubtaskTile extends StatelessWidget {
                       : AppSemanticColors.subtleBorder(context),
                   width: 2,
                 ),
-                color: done
-                    ? AppSemanticColors.successGreen
-                    : Colors.transparent,
+                color:
+                    done ? AppSemanticColors.successGreen : Colors.transparent,
               ),
               child: done
                   ? const Icon(Icons.check, size: 13, color: Colors.white)
@@ -659,9 +657,8 @@ class _SubtaskTile extends StatelessWidget {
                   color: done
                       ? AppSemanticColors.textFaint(context)
                       : AppSemanticColors.textStrong(context),
-                  decoration: done
-                      ? TextDecoration.lineThrough
-                      : TextDecoration.none,
+                  decoration:
+                      done ? TextDecoration.lineThrough : TextDecoration.none,
                 ),
               ),
             ),

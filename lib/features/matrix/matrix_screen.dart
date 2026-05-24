@@ -93,6 +93,11 @@ class _MatrixScreenState extends ConsumerState<MatrixScreen> {
     }
   }
 
+  Future<void> _onMoveTask(Task task, MatrixQuadrant target) async {
+    if (task.quadrant == target) return;
+    await ref.read(tasksProvider.notifier).bulkMoveQuadrant({task.id}, target);
+  }
+
   Future<void> _openTaskOverview(Task task, DateTime today) async {
     await showTaskDetailSheet(
       context,
@@ -135,6 +140,7 @@ class _MatrixScreenState extends ConsumerState<MatrixScreen> {
         soonThresholdDays: settings.gridSoonThreshold.days,
         onToggle: (task) => _onTileToggle(q, task, tasks, today),
         onOpen: (task) => _openTaskOverview(task, today),
+        onMoveTask: (task) => _onMoveTask(task, q),
       );
     }
 
@@ -389,6 +395,7 @@ class _QuadrantSection extends StatelessWidget {
     required this.soonThresholdDays,
     required this.onToggle,
     required this.onOpen,
+    required this.onMoveTask,
   });
 
   final MatrixQuadrant quadrant;
@@ -401,59 +408,87 @@ class _QuadrantSection extends StatelessWidget {
   final int soonThresholdDays;
   final ValueChanged<Task> onToggle;
   final ValueChanged<Task> onOpen;
+  final ValueChanged<Task> onMoveTask;
 
   @override
   Widget build(BuildContext context) {
     final surface = AppSemanticColors.tileBackground(context);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withValues(alpha: 0.35), width: 1.4),
-        boxShadow: [
-          BoxShadow(
-            color: AppSemanticColors.softShadow(context),
-            blurRadius: 6,
-            offset: const Offset(0, 1),
+    return DragTarget<Task>(
+      onWillAcceptWithDetails: (details) => details.data.quadrant != quadrant,
+      onAcceptWithDetails: (details) => onMoveTask(details.data),
+      builder: (context, candidateData, rejectedData) {
+        final dragOver = candidateData.isNotEmpty;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          decoration: BoxDecoration(
+            color: dragOver ? color.withValues(alpha: 0.10) : surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: dragOver ? color : color.withValues(alpha: 0.35),
+              width: dragOver ? 2.4 : 1.4,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: AppSemanticColors.softShadow(context),
+                blurRadius: dragOver ? 10 : 6,
+                offset: const Offset(0, 1),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _QuadrantHeader(
-              quadrant: quadrant, color: color, count: tasks.length),
-          Expanded(
-            child: tasks.isEmpty
-                ? _EmptyQuadrant(quadrant: quadrant, color: color)
-                : ListView.separated(
-                    padding: EdgeInsets.fromLTRB(
-                      8 * density,
-                      0,
-                      8 * density,
-                      8 * density,
-                    ),
-                    itemCount: tasks.length,
-                    separatorBuilder: (_, __) => SizedBox(height: 6 * density),
-                    itemBuilder: (context, i) {
-                      final task = tasks[i];
-                      return _GridTaskTile(
-                        task: task,
-                        accentColor: color,
-                        today: today,
-                        density: density,
-                        showOverdueHighlight: showOverdueHighlight,
-                        showUrgencyBadges: showUrgencyBadges,
-                        soonThresholdDays: soonThresholdDays,
-                        onToggle: () => onToggle(task),
-                        onOpen: () => onOpen(task),
-                      );
-                    },
-                  ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _QuadrantHeader(
+                  quadrant: quadrant, color: color, count: tasks.length),
+              Expanded(
+                child: tasks.isEmpty
+                    ? _EmptyQuadrant(quadrant: quadrant, color: color)
+                    : ListView.separated(
+                        padding: EdgeInsets.fromLTRB(
+                          8 * density,
+                          0,
+                          8 * density,
+                          8 * density,
+                        ),
+                        itemCount: tasks.length,
+                        separatorBuilder: (_, __) =>
+                            SizedBox(height: 6 * density),
+                        itemBuilder: (context, i) {
+                          final task = tasks[i];
+                          final tile = _GridTaskTile(
+                            task: task,
+                            accentColor: color,
+                            today: today,
+                            density: density,
+                            showOverdueHighlight: showOverdueHighlight,
+                            showUrgencyBadges: showUrgencyBadges,
+                            soonThresholdDays: soonThresholdDays,
+                            onToggle: () => onToggle(task),
+                            onOpen: () => onOpen(task),
+                          );
+                          return LongPressDraggable<Task>(
+                            data: task,
+                            rootOverlay: true,
+                            feedback: _MatrixDragFeedback(
+                              task: task,
+                              accentColor: color,
+                              density: density,
+                              maxWidth: MediaQuery.sizeOf(context).width * 0.38,
+                            ),
+                            childWhenDragging: Opacity(
+                              opacity: 0.35,
+                              child: tile,
+                            ),
+                            child: tile,
+                          );
+                        },
+                      ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -660,7 +695,6 @@ class _GridTaskTile extends StatelessWidget {
                       Expanded(
                         child: InkWell(
                           onTap: task.isEvent ? onOpen : onToggle,
-                          onLongPress: onOpen,
                           borderRadius: BorderRadius.circular(6),
                           child: Padding(
                             padding:
@@ -668,8 +702,7 @@ class _GridTaskTile extends StatelessWidget {
                             child: Row(
                               children: [
                                 Padding(
-                                  padding:
-                                      EdgeInsets.only(right: 8 * density),
+                                  padding: EdgeInsets.only(right: 8 * density),
                                   child: task.isEvent
                                       ? Icon(Icons.event,
                                           size: 16 * density,
@@ -685,8 +718,7 @@ class _GridTaskTile extends StatelessWidget {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
-                                      fontSize:
-                                          12.5 * density.clamp(0.85, 1.0),
+                                      fontSize: 12.5 * density.clamp(0.85, 1.0),
                                       fontWeight: FontWeight.w600,
                                       color: titleColor,
                                       decoration: _isCompleted
@@ -724,6 +756,76 @@ class _GridTaskTile extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MatrixDragFeedback extends StatelessWidget {
+  const _MatrixDragFeedback({
+    required this.task,
+    required this.accentColor,
+    required this.density,
+    required this.maxWidth,
+  });
+
+  final Task task;
+  final Color accentColor;
+  final double density;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final fontSize = 12.5 * density.clamp(0.85, 1.0);
+    return Material(
+      elevation: 6,
+      borderRadius: BorderRadius.circular(10),
+      color: AppSemanticColors.subtleSurface(context),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(width: 3, color: accentColor),
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      8 * density,
+                      7 * density,
+                      10 * density,
+                      7 * density,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.open_with_rounded,
+                          size: 14 * density,
+                          color: accentColor,
+                        ),
+                        SizedBox(width: 8 * density),
+                        Expanded(
+                          child: Text(
+                            task.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: fontSize,
+                              fontWeight: FontWeight.w600,
+                              color: AppSemanticColors.textStrong(context),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

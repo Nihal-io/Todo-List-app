@@ -426,7 +426,9 @@ class _DayPanel extends ConsumerWidget {
         return;
       }
       if (task.hasSubtasks) {
-        ref.read(calendarExpandedSubtaskTaskIdProvider.notifier).toggle(task.id);
+        ref
+            .read(calendarExpandedSubtaskTaskIdProvider.notifier)
+            .toggle(task.id);
         return;
       }
       await toggleTask(task);
