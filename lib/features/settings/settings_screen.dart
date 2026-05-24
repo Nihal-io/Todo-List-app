@@ -909,6 +909,182 @@ class _AnalyticsTile extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
+// Roadmap / stay tuned card
+// ---------------------------------------------------------------------------
+
+class _RoadmapCard extends StatelessWidget {
+  const _RoadmapCard();
+
+  static const List<({IconData icon, String title, String detail})> _items = [
+    (
+      icon: Icons.calendar_month_rounded,
+      title: 'Monthly analytics',
+      detail: 'Roll your daily completion up into month-over-month trends.',
+    ),
+    (
+      icon: Icons.checklist_rounded,
+      title: 'All-task analytics',
+      detail:
+          'Beyond recurring tasks — completion for one-offs, events, and projects too.',
+    ),
+    (
+      icon: Icons.scatter_plot_rounded,
+      title: 'Pearson correlation between tasks',
+      detail:
+          'Find the habits that move together — "I read more on days I exercise".',
+    ),
+    (
+      icon: Icons.auto_awesome_rounded,
+      title: 'AI insights',
+      detail:
+          'Plain-English summaries of where you\'re winning, slipping, and trending.',
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            primary.withValues(alpha: 0.09),
+            primary.withValues(alpha: 0.02),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: primary.withValues(alpha: 0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: primary.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.rocket_launch_rounded,
+                        size: 12, color: primary),
+                    const SizedBox(width: 4),
+                    Text(
+                      'STAY TUNED',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.8,
+                        color: primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Becoming a proper habit tracker',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: AppSemanticColors.textStrong(context),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'On the runway for the analytics surface — turning this todo list '
+            'into something that actually shows you the shape of your habits.',
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.4,
+              color: AppSemanticColors.textMuted(context),
+            ),
+          ),
+          const SizedBox(height: 12),
+          for (final item in _items) ...[
+            _RoadmapItem(
+              icon: item.icon,
+              title: item.title,
+              detail: item.detail,
+              accent: primary,
+            ),
+            if (item != _items.last) const SizedBox(height: 10),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _RoadmapItem extends StatelessWidget {
+  const _RoadmapItem({
+    required this.icon,
+    required this.title,
+    required this.detail,
+    required this.accent,
+  });
+
+  final IconData icon;
+  final String title;
+  final String detail;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, size: 16, color: accent),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: AppSemanticColors.textStrong(context),
+                ),
+              ),
+              const SizedBox(height: 1),
+              Text(
+                detail,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  height: 1.35,
+                  color: AppSemanticColors.textMuted(context),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Reset all
 // ---------------------------------------------------------------------------
 
