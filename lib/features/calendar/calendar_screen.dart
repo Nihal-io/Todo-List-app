@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:table_calendar/table_calendar.dart';
 import '../../models/app_settings.dart';
+import '../../models/sub_task.dart';
 import '../../models/task.dart';
 import '../../providers/selected_day_provider.dart';
 import '../../providers/settings_provider.dart';
@@ -28,6 +29,11 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<DateTime>(selectedCalendarDayProvider, (previous, next) {
+      if (previous == next) return;
+      ref.read(calendarExpandedSubtaskTaskIdProvider.notifier).collapse();
+    });
+
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
 
@@ -383,6 +389,7 @@ class _DayPanel extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tasks = ref.watch(tasksForDayProvider(selectedDay));
+    final expandedSubtaskId = ref.watch(calendarExpandedSubtaskTaskIdProvider);
 
     Future<void> toggleTask(Task task) async {
       final result = await ref
@@ -411,6 +418,52 @@ class _DayPanel extends ConsumerWidget {
         taskId: task.id,
         referenceDay: selectedDay,
       );
+    }
+
+    Future<void> handleRowTap(Task task) async {
+      if (task.isEvent) {
+        await openOverview(task);
+        return;
+      }
+      if (task.hasSubtasks) {
+        ref.read(calendarExpandedSubtaskTaskIdProvider.notifier).toggle(task.id);
+        return;
+      }
+      await toggleTask(task);
+    }
+
+    Future<void> handleSubtaskToggle(Task task, SubTask subtask) async {
+      final result = await ref.read(tasksProvider.notifier).toggleSubtask(
+            task.id,
+            subtask.id,
+            actionDay: selectedDay,
+          );
+      if (!context.mounted) return;
+      if (result.parentAutoCompleted) {
+        showSubtaskAutoCompletedSnackBar(
+          context,
+          task: task,
+          subtaskId: subtask.id,
+          actionDay: selectedDay,
+          recurring: task.isRecurring,
+        );
+      }
+    }
+
+    Future<void> handleCheckboxTap(Task task) async {
+      if (!task.hasSubtasks || task.isEvent) return;
+      final result = await ref
+          .read(tasksProvider.notifier)
+          .toggleAllSubtasks(task.id, actionDay: selectedDay);
+      if (!context.mounted) return;
+      if (result.parentAutoCompleted) {
+        showTaskCompletedSnackBar(
+          context,
+          task: task,
+          day: selectedDay,
+          recurring: task.isRecurring,
+        );
+      }
     }
 
     if (tasks.isEmpty) {
@@ -457,8 +510,11 @@ class _DayPanel extends ConsumerWidget {
           density: density,
           dateFormat: dateFormat,
           accentColor: colorFor(t),
-          onToggle: () => toggleTask(t),
-          onOpen: () => openOverview(t),
+          subtasksExpanded: expandedSubtaskId == t.id,
+          onTap: () => handleRowTap(t),
+          onLongPress: () => openOverview(t),
+          onCheckboxTap: () => handleCheckboxTap(t),
+          onSubtaskToggle: (s) => handleSubtaskToggle(t, s),
         );
       },
     );
@@ -473,20 +529,26 @@ class _TaskTile extends StatelessWidget {
   const _TaskTile({
     required this.task,
     required this.selectedDay,
-    required this.onToggle,
     required this.density,
     required this.dateFormat,
     required this.accentColor,
-    required this.onOpen,
+    required this.subtasksExpanded,
+    required this.onTap,
+    required this.onLongPress,
+    required this.onCheckboxTap,
+    required this.onSubtaskToggle,
   });
 
   final Task task;
   final DateTime selectedDay;
-  final VoidCallback onToggle;
   final DensityPref density;
   final DateFormatPref dateFormat;
   final Color accentColor;
-  final VoidCallback onOpen;
+  final bool subtasksExpanded;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+  final VoidCallback onCheckboxTap;
+  final ValueChanged<SubTask> onSubtaskToggle;
 
   static const _weekdayShort = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
@@ -542,148 +604,245 @@ class _TaskTile extends StatelessWidget {
           ),
         ],
       ),
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(
-              child: InkWell(
-                onTap: task.isEvent ? onOpen : onToggle,
-                onLongPress: onOpen,
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Row(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(right: 12),
-                        child: task.isEvent
-                            ? Icon(Icons.event, size: 22, color: accentColor)
-                            : Container(
-                                width: 22,
-                                height: 22,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: isDone
-                                        ? AppSemanticColors.successGreen
-                                        : AppSemanticColors.subtleBorder(
-                                            context),
-                                    width: 2,
-                                  ),
-                                  color: isDone
-                                      ? AppSemanticColors.successGreen
-                                      : Colors.transparent,
-                                ),
-                                child: isDone
-                                    ? const Icon(Icons.check,
-                                        size: 13, color: Colors.white)
-                                    : null,
-                              ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                if (task.isEvent)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: Icon(Icons.event, size: 22, color: accentColor),
+                  )
+                else
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: task.hasSubtasks ? onCheckboxTap : onTap,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: _CalendarCheckbox(
+                        completed: isDone,
+                        color: AppSemanticColors.successGreen,
                       ),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              task.title,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                                color: isDone
-                                    ? AppSemanticColors.textFaint(context)
-                                    : AppSemanticColors.textStrong(context),
-                                decoration: isDone
-                                    ? TextDecoration.lineThrough
-                                    : TextDecoration.none,
-                                decorationColor:
-                                    AppSemanticColors.textFaint(context),
-                              ),
-                            ),
-                            if (subtitle != null) ...[
-                              const SizedBox(height: 2),
+                    ),
+                  ),
+                Expanded(
+                  child: InkWell(
+                    onTap: onTap,
+                    onLongPress: onLongPress,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
                               Text(
-                                subtitle,
+                                task.title,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  fontSize: 12,
-                                  color: AppSemanticColors.textFaint(context),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDone
+                                      ? AppSemanticColors.textFaint(context)
+                                      : AppSemanticColors.textStrong(context),
+                                  decoration: isDone
+                                      ? TextDecoration.lineThrough
+                                      : TextDecoration.none,
+                                  decorationColor:
+                                      AppSemanticColors.textFaint(context),
                                 ),
                               ),
+                              if (subtitle != null) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  subtitle,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppSemanticColors.textFaint(context),
+                                  ),
+                                ),
+                              ],
                             ],
+                          ),
+                        ),
+                        if (!task.isEvent) ...[
+                          if (task.hasSubtasks) ...[
+                            _CalendarSubtaskCountBadge(
+                              done: task.completedSubtaskCount,
+                              total: task.subtasks.length,
+                              color: accentColor,
+                            ),
+                            const SizedBox(width: 2),
+                            Icon(
+                              subtasksExpanded
+                                  ? Icons.keyboard_arrow_up
+                                  : Icons.keyboard_arrow_down,
+                              size: 20,
+                              color: AppSemanticColors.textFaint(context),
+                            ),
+                          ] else ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: _priorityColor.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                task.priority.name.toUpperCase(),
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: _priorityColor,
+                                  letterSpacing: 0.4,
+                                ),
+                              ),
+                            ),
                           ],
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (subtasksExpanded && task.hasSubtasks)
+            _CalendarInlineSubtaskList(
+              subtasks: task.subtasks,
+              onToggle: onSubtaskToggle,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CalendarCheckbox extends StatelessWidget {
+  const _CalendarCheckbox({required this.completed, required this.color});
+
+  final bool completed;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: completed ? color : AppSemanticColors.subtleBorder(context),
+          width: 2,
+        ),
+        color: completed ? color : Colors.transparent,
+      ),
+      child: completed
+          ? const Icon(Icons.check, size: 13, color: Colors.white)
+          : null,
+    );
+  }
+}
+
+class _CalendarSubtaskCountBadge extends StatelessWidget {
+  const _CalendarSubtaskCountBadge({
+    required this.done,
+    required this.total,
+    required this.color,
+  });
+
+  final int done;
+  final int total;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.check_box_outlined, size: 10, color: color),
+          const SizedBox(width: 3),
+          Text(
+            '$done/$total',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CalendarInlineSubtaskList extends StatelessWidget {
+  const _CalendarInlineSubtaskList({
+    required this.subtasks,
+    required this.onToggle,
+  });
+
+  final List<SubTask> subtasks;
+  final ValueChanged<SubTask> onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: AppSemanticColors.subtleBorder(context)),
+        ),
+      ),
+      constraints: const BoxConstraints(maxHeight: 200),
+      child: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.fromLTRB(46, 4, 12, 8),
+        children: [
+          for (final s in subtasks)
+            InkWell(
+              onTap: () => onToggle(s),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  children: [
+                    _CalendarCheckbox(
+                      completed: s.completed,
+                      color: AppSemanticColors.successGreen,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        s.title,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: s.completed
+                              ? AppSemanticColors.textFaint(context)
+                              : AppSemanticColors.textStrong(context),
+                          decoration: s.completed
+                              ? TextDecoration.lineThrough
+                              : TextDecoration.none,
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            if (task.hasSubtasks)
-              GestureDetector(
-                onTap: onOpen,
-                behavior: HitTestBehavior.opaque,
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 4),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: accentColor.withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.check_box_outlined,
-                                size: 11, color: accentColor),
-                            const SizedBox(width: 3),
-                            Text(
-                              '${task.completedSubtaskCount}/${task.subtasks.length}',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                color: accentColor,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Icon(
-                        Icons.chevron_right,
-                        size: 20,
-                        color: AppSemanticColors.textFaint(context),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            if (!task.isEvent) ...[
-              const SizedBox(width: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: _priorityColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  task.priority.name.toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: _priorityColor,
-                    letterSpacing: 0.4,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
+        ],
       ),
     );
   }

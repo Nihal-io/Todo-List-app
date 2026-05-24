@@ -50,3 +50,7 @@ android/key.properties
 **/*.keystore
 
 .cursorrules
+
+# Claude Code
+.claude/
+CLAUDE.md

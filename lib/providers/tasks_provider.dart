@@ -404,6 +404,58 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
     );
   }
 
+  /// Marks every subtask complete or incomplete. When completing all, the
+  /// parent is auto-completed for [actionDay]; when clearing all, the parent
+  /// is auto-uncompleted.
+  Future<SubtaskToggleResult> toggleAllSubtasks(
+    String taskId, {
+    DateTime? actionDay,
+  }) async {
+    Task? original;
+    for (final t in _current) {
+      if (t.id == taskId) {
+        original = t;
+        break;
+      }
+    }
+    if (original == null || !original.hasSubtasks) {
+      return const SubtaskToggleResult();
+    }
+
+    final day = actionDay != null ? dateOnly(actionDay) : null;
+    final wasParentDone = original.isRecurring
+        ? (day != null && original.isCompletedOn(day))
+        : original.completed;
+    final completeAll = !original.allSubtasksComplete;
+
+    var updated = original.copyWith(
+      subtasks: [
+        for (final s in original.subtasks) s.copyWith(completed: completeAll),
+      ],
+    );
+
+    var parentAutoCompleted = false;
+    var parentAutoUncompleted = false;
+
+    if (completeAll && !wasParentDone) {
+      updated = _setParentCompleted(updated, day, true);
+      parentAutoCompleted = true;
+    } else if (!completeAll && wasParentDone) {
+      updated = _setParentCompleted(updated, day, false);
+      parentAutoUncompleted = true;
+    }
+
+    final next = [
+      for (final t in _current) (t.id == taskId ? updated : t),
+    ];
+    await _commit(next);
+    _rescheduleAll(next);
+    return SubtaskToggleResult(
+      parentAutoCompleted: parentAutoCompleted,
+      parentAutoUncompleted: parentAutoUncompleted,
+    );
+  }
+
   Task _setParentCompleted(Task task, DateTime? day, bool complete) {
     if (task.isRecurring) {
       if (day == null) return task;

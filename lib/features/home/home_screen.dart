@@ -18,6 +18,8 @@ import '../../shared/widgets/task_snackbars.dart';
 import '../../theme/app_theme.dart';
 import 'home_task_sort.dart';
 
+enum _HomeListSection { current, upcoming, overdue }
+
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
@@ -98,12 +100,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         comparator: compareOverdueTasks,
       );
 
+  void _freezeListOrder(_HomeListSection section, List<Task> displayed) {
+    final ids = displayed.map((t) => t.id).toList();
+    switch (section) {
+      case _HomeListSection.current:
+        _frozenCurrentIds = ids;
+        _sortCurrent = false;
+      case _HomeListSection.upcoming:
+        _frozenUpcomingIds = ids;
+        _sortUpcoming = false;
+      case _HomeListSection.overdue:
+        _frozenOverdueIds = ids;
+        _sortOverdue = false;
+    }
+  }
+
   Future<void> _freezeAndToggleCurrent(
       Task task, List<Task> displayed, DateTime today) async {
-    setState(() {
-      _frozenCurrentIds = displayed.map((t) => t.id).toList();
-      _sortCurrent = false;
-    });
+    setState(() => _freezeListOrder(_HomeListSection.current, displayed));
     final result = await ref
         .read(tasksProvider.notifier)
         .toggleForDay(task.id, today);
@@ -113,10 +127,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Future<void> _freezeAndToggleUpcoming(
       Task task, List<Task> displayed, DateTime today) async {
-    setState(() {
-      _frozenUpcomingIds = displayed.map((t) => t.id).toList();
-      _sortUpcoming = false;
-    });
+    setState(() => _freezeListOrder(_HomeListSection.upcoming, displayed));
     final actionDay =
         task.actionDayForRow(today, inUpcomingSection: true);
     final TaskToggleResult result;
@@ -138,10 +149,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Future<void> _freezeAndToggleOverdue(
       Task task, List<Task> displayed) async {
-    setState(() {
-      _frozenOverdueIds = displayed.map((t) => t.id).toList();
-      _sortOverdue = false;
-    });
+    setState(() => _freezeListOrder(_HomeListSection.overdue, displayed));
     final result = await ref.read(tasksProvider.notifier).toggle(task.id);
     if (!mounted) return;
     _handleToggleResult(task, task.startDate, result, recurring: false);
@@ -212,9 +220,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Future<void> _handleSubtaskToggle(
     Task task,
     SubTask subtask,
-    DateTime today, {
+    DateTime today,
+    List<Task> displayed, {
+    required _HomeListSection section,
     required bool upcoming,
   }) async {
+    setState(() => _freezeListOrder(section, displayed));
     final actionDay =
         task.actionDayForRow(today, inUpcomingSection: upcoming);
     final result = await ref.read(tasksProvider.notifier).toggleSubtask(
@@ -229,6 +240,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         task: task,
         subtaskId: subtask.id,
         actionDay: actionDay,
+        recurring: task.isRecurring,
+      );
+    }
+  }
+
+  Future<void> _handleMultiTaskCheckboxTap(
+    Task task,
+    DateTime today,
+    List<Task> displayed, {
+    required _HomeListSection section,
+    required bool upcoming,
+  }) async {
+    setState(() => _freezeListOrder(section, displayed));
+    final actionDay =
+        task.actionDayForRow(today, inUpcomingSection: upcoming);
+    final result = await ref
+        .read(tasksProvider.notifier)
+        .toggleAllSubtasks(task.id, actionDay: actionDay);
+    if (!mounted) return;
+    if (result.parentAutoCompleted) {
+      showTaskCompletedSnackBar(
+        context,
+        task: task,
+        day: actionDay,
         recurring: task.isRecurring,
       );
     }
@@ -441,6 +476,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       task,
                       subtask,
                       today,
+                      overdue,
+                      section: _HomeListSection.overdue,
+                      upcoming: false,
+                    ),
+                    onCheckboxTap: (task) => _handleMultiTaskCheckboxTap(
+                      task,
+                      today,
+                      overdue,
+                      section: _HomeListSection.overdue,
                       upcoming: false,
                     ),
                     selectionIds: selection.active ? selection.ids : null,
@@ -480,6 +524,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       task,
                       subtask,
                       today,
+                      current,
+                      section: _HomeListSection.current,
+                      upcoming: false,
+                    ),
+                    onCheckboxTap: (task) => _handleMultiTaskCheckboxTap(
+                      task,
+                      today,
+                      current,
+                      section: _HomeListSection.current,
                       upcoming: false,
                     ),
                     reorderable: _reorderCurrent,
@@ -510,6 +563,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       task,
                       subtask,
                       today,
+                      upcoming,
+                      section: _HomeListSection.upcoming,
+                      upcoming: true,
+                    ),
+                    onCheckboxTap: (task) => _handleMultiTaskCheckboxTap(
+                      task,
+                      today,
+                      upcoming,
+                      section: _HomeListSection.upcoming,
                       upcoming: true,
                     ),
                     reorderable: _reorderUpcoming,
@@ -714,6 +776,7 @@ class _OverduePanel extends ConsumerWidget {
     required this.onRowTap,
     required this.onLongPress,
     required this.onSubtaskToggle,
+    required this.onCheckboxTap,
     required this.selectionIds,
   });
 
@@ -725,6 +788,7 @@ class _OverduePanel extends ConsumerWidget {
   final ValueChanged<Task> onRowTap;
   final ValueChanged<Task> onLongPress;
   final void Function(Task task, SubTask subtask) onSubtaskToggle;
+  final ValueChanged<Task> onCheckboxTap;
   final Set<String>? selectionIds;
 
   @override
@@ -777,6 +841,7 @@ class _OverduePanel extends ConsumerWidget {
                 task: t,
                 onTap: () => onRowTap(t),
                 onLongPress: () => onLongPress(t),
+                onCheckboxTap: () => onCheckboxTap(t),
                 onSubtaskToggle: (s) => onSubtaskToggle(t, s),
                 subtasksExpanded: expandedSubtaskId == t.id,
                 selected: selectionIds?.contains(t.id) ?? false,
@@ -817,6 +882,7 @@ class _OverdueTile extends StatelessWidget {
     required this.task,
     required this.onTap,
     required this.onLongPress,
+    required this.onCheckboxTap,
     required this.onSubtaskToggle,
     required this.subtasksExpanded,
     required this.selected,
@@ -826,6 +892,7 @@ class _OverdueTile extends StatelessWidget {
   final Task task;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
+  final VoidCallback onCheckboxTap;
   final ValueChanged<SubTask> onSubtaskToggle;
   final bool subtasksExpanded;
   final bool selected;
@@ -850,15 +917,17 @@ class _OverdueTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          InkWell(
-            onTap: onTap,
-            onLongPress: onLongPress,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Padding(
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: selectionActive
+                      ? onTap
+                      : (task.hasSubtasks ? onCheckboxTap : onTap),
+                  child: Padding(
                     padding: const EdgeInsets.only(right: 12),
                     child: selectionActive
                         ? _Checkbox(
@@ -867,66 +936,77 @@ class _OverdueTile extends StatelessWidget {
                           )
                         : _Checkbox(completed: done, color: statusColor),
                   ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                ),
+                Expanded(
+                  child: InkWell(
+                    onTap: onTap,
+                    onLongPress: onLongPress,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Text(
-                          task.title,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: done
-                                ? AppSemanticColors.textFaint(context)
-                                : error,
-                            decoration: done
-                                ? TextDecoration.lineThrough
-                                : TextDecoration.none,
-                            decorationColor:
-                                AppSemanticColors.textFaint(context),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                task.title,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: done
+                                      ? AppSemanticColors.textFaint(context)
+                                      : error,
+                                  decoration: done
+                                      ? TextDecoration.lineThrough
+                                      : TextDecoration.none,
+                                  decorationColor:
+                                      AppSemanticColors.textFaint(context),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                done
+                                    ? 'Resolved  ·  ${_overdueAgoLabel(task)}'
+                                    : _overdueAgoLabel(task),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: done
+                                      ? AppSemanticColors.textFaint(context)
+                                      : error.withValues(alpha: 0.85),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          done
-                              ? 'Resolved  ·  ${_overdueAgoLabel(task)}'
-                              : _overdueAgoLabel(task),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: done
-                                ? AppSemanticColors.textFaint(context)
-                                : error.withValues(alpha: 0.85),
+                        if (task.hasSubtasks) ...[
+                          _SubtaskCountBadge(
+                            done: task.completedSubtaskCount,
+                            total: task.subtasks.length,
+                            color: statusColor,
                           ),
-                        ),
+                          const SizedBox(width: 2),
+                          Icon(
+                            subtasksExpanded
+                                ? Icons.keyboard_arrow_up
+                                : Icons.keyboard_arrow_down,
+                            size: 20,
+                            color: AppSemanticColors.textFaint(context),
+                          ),
+                        ] else
+                          _StatusBadge(
+                            isMultiDay: task.isMultiDay,
+                            isRecurring: task.isRecurring,
+                            hasSubtasks: false,
+                            subtasksDone: 0,
+                            subtasksTotal: 0,
+                            color: statusColor,
+                          ),
                       ],
                     ),
                   ),
-                  if (task.hasSubtasks) ...[
-                    _SubtaskCountBadge(
-                      done: task.completedSubtaskCount,
-                      total: task.subtasks.length,
-                      color: statusColor,
-                    ),
-                    const SizedBox(width: 2),
-                    Icon(
-                      subtasksExpanded
-                          ? Icons.keyboard_arrow_up
-                          : Icons.keyboard_arrow_down,
-                      size: 20,
-                      color: AppSemanticColors.textFaint(context),
-                    ),
-                  ] else
-                    _StatusBadge(
-                      isMultiDay: task.isMultiDay,
-                      isRecurring: task.isRecurring,
-                      hasSubtasks: false,
-                      subtasksDone: 0,
-                      subtasksTotal: 0,
-                      color: statusColor,
-                    ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
           if (subtasksExpanded && task.hasSubtasks)
@@ -1056,6 +1136,7 @@ class _TaskList extends ConsumerWidget {
     required this.onRowTap,
     required this.onLongPress,
     required this.onSubtaskToggle,
+    required this.onCheckboxTap,
     this.upcoming = false,
     required this.emptyIcon,
     required this.emptyText,
@@ -1072,6 +1153,7 @@ class _TaskList extends ConsumerWidget {
   final ValueChanged<Task> onRowTap;
   final ValueChanged<Task> onLongPress;
   final void Function(Task task, SubTask subtask) onSubtaskToggle;
+  final ValueChanged<Task> onCheckboxTap;
   final bool upcoming;
   final IconData emptyIcon;
   final String emptyText;
@@ -1133,6 +1215,7 @@ class _TaskList extends ConsumerWidget {
               accentColor: quadrantColors[t.quadrant] ?? t.color,
               onTap: () => onRowTap(t),
               onLongPress: () => onLongPress(t),
+              onCheckboxTap: () => onCheckboxTap(t),
               onSubtaskToggle: (s) => onSubtaskToggle(t, s),
               subtasksExpanded: expandedSubtaskId == t.id,
               reorderable: true,
@@ -1158,6 +1241,7 @@ class _TaskList extends ConsumerWidget {
               accentColor: quadrantColors[t.quadrant] ?? t.color,
               onTap: () => onRowTap(t),
               onLongPress: () => onLongPress(t),
+              onCheckboxTap: () => onCheckboxTap(t),
               onSubtaskToggle: (s) => onSubtaskToggle(t, s),
               subtasksExpanded: expandedSubtaskId == t.id,
               reorderable: false,
@@ -1179,6 +1263,7 @@ class _HomeTaskTile extends StatelessWidget {
     required this.dateFormat,
     required this.accentColor,
     required this.onLongPress,
+    required this.onCheckboxTap,
     required this.onSubtaskToggle,
     required this.subtasksExpanded,
     this.upcoming = false,
@@ -1194,6 +1279,7 @@ class _HomeTaskTile extends StatelessWidget {
   final DateFormatPref dateFormat;
   final Color accentColor;
   final VoidCallback onLongPress;
+  final VoidCallback onCheckboxTap;
   final ValueChanged<SubTask> onSubtaskToggle;
   final bool subtasksExpanded;
   final bool upcoming;
@@ -1254,95 +1340,111 @@ class _HomeTaskTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          InkWell(
-            onTap: onTap,
-            onLongPress: onLongPress,
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                if (showCheckbox)
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: selectionActive
+                        ? onTap
+                        : (task.hasSubtasks ? onCheckboxTap : onTap),
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: selectionActive
+                          ? _Checkbox(
+                              completed: selected,
+                              color: theme.colorScheme.primary,
+                            )
+                          : _Checkbox(
+                              completed: _isDone,
+                              color: AppSemanticColors.successGreen,
+                            ),
+                    ),
+                  )
+                else
                   Padding(
                     padding: const EdgeInsets.only(right: 12),
-                    child: selectionActive
-                        ? _Checkbox(
-                            completed: selected,
-                            color: theme.colorScheme.primary,
-                          )
-                        : (showCheckbox
-                            ? _Checkbox(
-                                completed: _isDone,
-                                color: AppSemanticColors.successGreen,
-                              )
-                            : Icon(Icons.event,
-                                size: 22, color: accentColor)),
+                    child: Icon(Icons.event, size: 22, color: accentColor),
                   ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                Expanded(
+                  child: InkWell(
+                    onTap: onTap,
+                    onLongPress: onLongPress,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Text(
-                          task.title,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: _isDone
-                                ? AppSemanticColors.textFaint(context)
-                                : AppSemanticColors.textStrong(context),
-                            decoration: _isDone
-                                ? TextDecoration.lineThrough
-                                : TextDecoration.none,
-                            decorationColor:
-                                AppSemanticColors.textFaint(context),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                task.title,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: _isDone
+                                      ? AppSemanticColors.textFaint(context)
+                                      : AppSemanticColors.textStrong(context),
+                                  decoration: _isDone
+                                      ? TextDecoration.lineThrough
+                                      : TextDecoration.none,
+                                  decorationColor:
+                                      AppSemanticColors.textFaint(context),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _dateLabel,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: AppSemanticColors.textFaint(context),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _dateLabel,
-                          style: TextStyle(
-                            fontSize: 12,
+                        if (!task.isEvent) ...[
+                          if (task.hasSubtasks) ...[
+                            _SubtaskCountBadge(
+                              done: task.completedSubtaskCount,
+                              total: task.subtasks.length,
+                              color: accentColor,
+                            ),
+                            const SizedBox(width: 2),
+                            Icon(
+                              subtasksExpanded
+                                  ? Icons.keyboard_arrow_up
+                                  : Icons.keyboard_arrow_down,
+                              size: 20,
+                              color: AppSemanticColors.textFaint(context),
+                            ),
+                          ] else
+                            _StatusBadge(
+                              isMultiDay: task.isMultiDay,
+                              isRecurring: task.isRecurring,
+                              hasSubtasks: false,
+                              subtasksDone: 0,
+                              subtasksTotal: 0,
+                              color: accentColor,
+                            ),
+                        ],
+                        if (reorderable) ...[
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.drag_indicator,
+                            size: 18,
                             color: AppSemanticColors.textFaint(context),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),
-                  if (!task.isEvent) ...[
-                    if (task.hasSubtasks) ...[
-                      _SubtaskCountBadge(
-                        done: task.completedSubtaskCount,
-                        total: task.subtasks.length,
-                        color: accentColor,
-                      ),
-                      const SizedBox(width: 2),
-                      Icon(
-                        subtasksExpanded
-                            ? Icons.keyboard_arrow_up
-                            : Icons.keyboard_arrow_down,
-                        size: 20,
-                        color: AppSemanticColors.textFaint(context),
-                      ),
-                    ] else
-                      _StatusBadge(
-                        isMultiDay: task.isMultiDay,
-                        isRecurring: task.isRecurring,
-                        hasSubtasks: false,
-                        subtasksDone: 0,
-                        subtasksTotal: 0,
-                        color: accentColor,
-                      ),
-                  ],
-                  if (reorderable) ...[
-                    const SizedBox(width: 4),
-                    Icon(
-                      Icons.drag_indicator,
-                      size: 18,
-                      color: AppSemanticColors.textFaint(context),
-                    ),
-                  ],
-                ],
-              ),
+                ),
+              ],
             ),
           ),
           if (subtasksExpanded && task.hasSubtasks)
