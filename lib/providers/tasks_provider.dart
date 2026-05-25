@@ -629,25 +629,38 @@ class TasksNotifier extends AsyncNotifier<List<Task>> {
   // ---------------- Bulk operations (multi-select) ----------------
 
   Future<void> bulkComplete(Set<String> ids, DateTime onDay) async {
-    final d = dateOnly(onDay);
     final next = <Task>[];
     for (final t in _current) {
       if (!ids.contains(t.id)) {
         next.add(t);
         continue;
       }
-      if (!t.allSubtasksComplete) {
-        next.add(t);
-        continue;
+
+      // Cascade-complete any open subtasks so bulk doesn't silently skip
+      // tasks whose checklists aren't ticked off — matches what the detail
+      // sheet's Complete button does for an individual task.
+      var updated = t;
+      if (updated.hasSubtasks && !updated.allSubtasksComplete) {
+        updated = updated.copyWith(
+          subtasks: [
+            for (final s in updated.subtasks) s.copyWith(completed: true),
+          ],
+        );
       }
-      if (t.isRecurring) {
-        if (t.completedDates.any((x) => sameDay(x, d))) {
-          next.add(t);
+
+      if (updated.isRecurring) {
+        // Snap non-applicable days (e.g. bulk-complete on a Sunday for a
+        // Mon/Wed/Fri task) to the next applicable occurrence so the tick
+        // is visible to the streak and analytics layers.
+        final d = _effectiveActionDay(updated, onDay);
+        if (updated.completedDates.any((x) => sameDay(x, d))) {
+          next.add(updated);
         } else {
-          next.add(t.copyWith(completedDates: {...t.completedDates, d}));
+          next.add(updated
+              .copyWith(completedDates: {...updated.completedDates, d}));
         }
       } else {
-        next.add(t.copyWith(completed: true));
+        next.add(updated.copyWith(completed: true));
       }
     }
     await _commit(next);

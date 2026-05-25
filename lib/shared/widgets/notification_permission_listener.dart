@@ -17,14 +17,10 @@ void showNotificationPermissionSnackBar(
   final text = status.issues.join('\n');
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
-      content: Text(text),
-      duration: const Duration(seconds: 8),
-      action: SnackBarAction(
-        label: 'OK',
-        onPressed: () {
-          ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        },
-      ),
+      content: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis),
+      duration: const Duration(seconds: 1),
+      behavior: SnackBarBehavior.floating,
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
     ),
   );
 }

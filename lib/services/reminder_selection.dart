@@ -39,14 +39,32 @@ List<Task> topUpcomingTasks(List<Task> tasks, DateTime day) {
     ..sort((a, b) => compareUpcomingTasks(a, b, d));
 }
 
-/// Tasks that should receive scheduled alarms: today's pending items first,
-/// otherwise the nearest upcoming tasks.
+/// Tasks that should receive scheduled alarms.
+///
+/// - Today's pending items (one-offs due today, recurring tasks that apply
+///   today and aren't yet ticked).
+/// - **Plus** every recurring task that still has a future occurrence,
+///   regardless of whether today is one of its applicable days. The
+///   recurring scheduler queues 24 future alarms per task, and if the
+///   task is missing from the targets set on a non-applicable day the
+///   rescheduler will cancel all of those queued alarms — silently
+///   breaking notifications until the app is reopened on the next
+///   applicable day.
+/// - If both sets are empty, fall back to the nearest upcoming tasks.
 List<Task> tasksForScheduledReminders(List<Task> tasks, [DateTime? day]) {
   final today = dateOnly(day ?? DateTime.now());
-  final pendingToday = pendingTasksForDay(tasks, today);
-  if (pendingToday.isNotEmpty) return pendingToday;
-  final upcoming = topUpcomingTasks(tasks, today);
-  return upcoming.take(kMaxUpcomingReminderTasks).toList();
+  final seen = <String>{};
+  final out = <Task>[];
+  for (final t in pendingTasksForDay(tasks, today)) {
+    if (seen.add(t.id)) out.add(t);
+  }
+  for (final t in tasks) {
+    if (!t.isRecurring) continue;
+    if (t.nextOccurrenceAfter(today) == null) continue;
+    if (seen.add(t.id)) out.add(t);
+  }
+  if (out.isNotEmpty) return out;
+  return topUpcomingTasks(tasks, today).take(kMaxUpcomingReminderTasks).toList();
 }
 
 /// Title + body copy for the Android foreground-service notification.

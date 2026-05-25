@@ -6,17 +6,15 @@ import '../../providers/tasks_provider.dart';
 
 const _compactMargin = EdgeInsets.fromLTRB(12, 0, 12, 12);
 
-SnackBar _compactSnackBar({
-  required String message,
-  Duration duration = const Duration(seconds: 2),
-  SnackBarAction? action,
-}) {
+/// All snackbars in the app are one-second floating toasts with no action.
+/// The visible row state (checkbox tick, strike-through, new row appearing)
+/// is the real confirmation — these just nudge you that something happened.
+SnackBar _compactSnackBar({required String message}) {
   return SnackBar(
     content: Text(message, maxLines: 1, overflow: TextOverflow.ellipsis),
-    duration: duration,
+    duration: const Duration(seconds: 1),
     behavior: SnackBarBehavior.floating,
     margin: _compactMargin,
-    action: action,
   );
 }
 
@@ -29,28 +27,7 @@ void showTaskCompletedSnackBar(
   final messenger = ScaffoldMessenger.of(context);
   messenger.clearSnackBars();
   messenger.showSnackBar(
-    _compactSnackBar(
-      message: 'Completed "${task.title}"',
-      duration: const Duration(seconds: 3),
-      action: SnackBarAction(
-        label: 'Undo',
-        onPressed: () {
-          final container = ProviderScope.containerOf(context);
-          final notifier = container.read(tasksProvider.notifier);
-          if (recurring) {
-            notifier.toggleForDay(task.id, day);
-          } else {
-            notifier.toggle(task.id);
-          }
-        },
-      ),
-    ),
-  );
-}
-
-void showTaskCreatedSnackBar(BuildContext context, Task task) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    _compactSnackBar(message: 'Task added'),
+    _compactSnackBar(message: 'Completed "${task.title}"'),
   );
 }
 
@@ -101,21 +78,6 @@ void showSubtaskAutoCompletedSnackBar(
   final messenger = ScaffoldMessenger.of(context);
   messenger.clearSnackBars();
   messenger.showSnackBar(
-    _compactSnackBar(
-      message: 'Completed "${task.title}"',
-      duration: const Duration(seconds: 3),
-      action: SnackBarAction(
-        label: 'Undo',
-        onPressed: () {
-          final container = ProviderScope.containerOf(context);
-          final notifier = container.read(tasksProvider.notifier);
-          notifier.toggleSubtask(
-            task.id,
-            subtaskId,
-            actionDay: actionDay,
-          );
-        },
-      ),
-    ),
+    _compactSnackBar(message: 'Completed "${task.title}"'),
   );
 }

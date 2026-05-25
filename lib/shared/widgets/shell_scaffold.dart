@@ -5,7 +5,6 @@ import '../../features/calendar/add_item_sheet.dart';
 import '../../providers/home_provider.dart';
 import '../../providers/matrix_provider.dart';
 import '../../providers/selected_day_provider.dart';
-import '../../shared/widgets/task_snackbars.dart';
 import '../../theme/app_theme.dart';
 
 class ShellScaffold extends ConsumerWidget {
@@ -53,11 +52,9 @@ class ShellScaffold extends ConsumerWidget {
                   DateTime.now().month,
                   DateTime.now().day,
                 );
-          final created =
-              await showAddItemSheet(context, initialDate: initialDate);
-          if (created != null && context.mounted) {
-            showTaskCreatedSnackBar(context, created);
-          }
+          await showAddItemSheet(context, initialDate: initialDate);
+          // No "Task added" toast — the new row appearing in the list is
+          // the confirmation.
         },
         tooltip: 'Add task or event',
         child: const Icon(Icons.add, size: 28),
