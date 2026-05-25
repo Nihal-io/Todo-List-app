@@ -5,6 +5,7 @@ import '../../features/calendar/add_item_sheet.dart';
 import '../../providers/home_provider.dart';
 import '../../providers/matrix_provider.dart';
 import '../../providers/selected_day_provider.dart';
+import '../../providers/selection_provider.dart';
 import '../../theme/app_theme.dart';
 
 class ShellScaffold extends ConsumerWidget {
@@ -19,6 +20,8 @@ class ShellScaffold extends ConsumerWidget {
     final currentIndex = navigationShell.currentIndex;
     final returningToHome = currentIndex != 0 && index == 0;
     final returningToMatrix = currentIndex != 1 && index == 1;
+    final leavingHome = currentIndex == 0 && index != 0;
+
     if (returningToHome) {
       final next = ref.read(homeRevisitSignalProvider) + 1;
       ref.read(homeRevisitSignalProvider.notifier).state = next;
@@ -26,6 +29,12 @@ class ShellScaffold extends ConsumerWidget {
     if (returningToMatrix) {
       final next = ref.read(matrixRevisitSignalProvider) + 1;
       ref.read(matrixRevisitSignalProvider.notifier).state = next;
+    }
+    // Selection mode is a Home-only feature; clear it when the user
+    // navigates to another panel so they don't come back to a half-active
+    // selection bar.
+    if (leavingHome && ref.read(selectionProvider).active) {
+      ref.read(selectionProvider.notifier).exit();
     }
     navigationShell.goBranch(
       index,
