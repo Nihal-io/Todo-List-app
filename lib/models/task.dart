@@ -339,7 +339,13 @@ class Task {
       if (day == null) return null;
       final candidate = atTime(day);
       if (candidate.isAfter(after)) return candidate;
-      return after.add(const Duration(minutes: 1));
+      // Today's reminder time has already passed. Skip to the next
+      // applicable occurrence — never re-fire today, otherwise the
+      // recurring scheduler queues a notification every minute until the
+      // 24-occurrence cap and floods the device.
+      final nextDay =
+          nextOccurrenceAfter(afterDay.add(const Duration(days: 1)));
+      return nextDay == null ? null : atTime(nextDay);
     }
 
     final start = dateOnly(startDate);
@@ -349,7 +355,9 @@ class Task {
     if (!afterDay.isBefore(start) && !afterDay.isAfter(end)) {
       final candidate = atTime(afterDay);
       if (candidate.isAfter(after)) return candidate;
-      return after.add(const Duration(minutes: 1));
+      // Today's reminder time has already passed. Fire at tomorrow's
+      // default time instead of looping every minute.
+      return atTime(afterDay.add(const Duration(days: 1)));
     }
 
     // Future one-off / event.
@@ -359,7 +367,8 @@ class Task {
     if (afterDay.isAfter(end)) {
       final candidate = atTime(afterDay);
       if (candidate.isAfter(after)) return candidate;
-      return after.add(const Duration(minutes: 1));
+      // Already nudged today; queue tomorrow's nudge.
+      return atTime(afterDay.add(const Duration(days: 1)));
     }
 
     return null;

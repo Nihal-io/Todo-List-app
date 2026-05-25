@@ -74,13 +74,31 @@ class NotificationService {
 
   bool _initialised = false;
   bool _supported = true;
-  bool _foregroundRunning = false;
+
+  /// All public methods that mutate scheduled notifications chain onto this
+  /// future, so two callers (e.g. an app-resume reschedule racing with a
+  /// notification-tap reschedule) can't interleave and produce duplicate or
+  /// dropped alarms.
+  Future<void> _queue = Future.value();
 
   /// Called when the user taps a task reminder — used to queue the next
   /// occurrence for recurring tasks.
   void Function(String taskId)? onTaskReminderFired;
 
   bool get isSupported => _supported;
+
+  /// Runs [body] serially on the notification queue.
+  Future<T> _enqueue<T>(Future<T> Function() body) {
+    final completer = Completer<T>();
+    _queue = _queue.then((_) async {
+      try {
+        completer.complete(await body());
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
+    });
+    return completer.future;
+  }
 
   Future<void> init() async {
     if (_initialised) return;
@@ -214,7 +232,11 @@ class NotificationService {
       _notificationIdFor('$taskId@${fireAt.millisecondsSinceEpoch}');
 
   /// Cancels every pending notification whose payload matches [taskId].
-  Future<void> cancelForTask(String taskId) async {
+  Future<void> cancelForTask(String taskId) {
+    return _enqueue(() => _cancelForTaskInner(taskId));
+  }
+
+  Future<void> _cancelForTaskInner(String taskId) async {
     if (!_supported) return;
     try {
       await _plugin.cancel(_notificationIdFor(taskId));
@@ -232,7 +254,14 @@ class NotificationService {
   Future<void> scheduleRemindersForAll(
     List<Task> tasks, {
     bool enabled = true,
-  }) async {
+  }) {
+    return _enqueue(() => _scheduleRemindersForAllInner(tasks, enabled));
+  }
+
+  Future<void> _scheduleRemindersForAllInner(
+    List<Task> tasks,
+    bool enabled,
+  ) async {
     if (!_supported || !enabled) return;
     final targets = tasksForScheduledReminders(tasks);
     final targetIds = targets.map((t) => t.id).toSet();
@@ -250,15 +279,20 @@ class NotificationService {
     } catch (_) {}
 
     for (final task in targets) {
-      await scheduleForTask(task, enabled: true);
+      // Bypass the queue — we're already holding it for the whole batch.
+      await _scheduleForTaskInner(task, true);
     }
   }
 
   /// (Re)schedules the next occurrence(s) for [task]. Recurring tasks queue
   /// several future alarms so they keep firing without reopening the app.
-  Future<void> scheduleForTask(Task task, {bool enabled = true}) async {
+  Future<void> scheduleForTask(Task task, {bool enabled = true}) {
+    return _enqueue(() => _scheduleForTaskInner(task, enabled));
+  }
+
+  Future<void> _scheduleForTaskInner(Task task, bool enabled) async {
     if (!_supported) return;
-    await cancelForTask(task.id);
+    await _cancelForTaskInner(task.id);
     if (!enabled) return;
 
     if (task.isRecurring) {
@@ -281,10 +315,17 @@ class NotificationService {
   Future<void> _scheduleRecurringOccurrences(Task task) async {
     var cursor = DateTime.now();
     var scheduled = 0;
+    DateTime? lastFireAt;
 
     while (scheduled < _maxRecurringOccurrences) {
       final fireAt = task.nextReminderAfter(cursor);
       if (fireAt == null) break;
+
+      // Defensive: a recurring task should never schedule twice on the
+      // same calendar day. If [nextReminderAfter] regresses (or stalls on
+      // today) we'd otherwise queue dozens of same-minute alarms — bail.
+      if (lastFireAt != null && sameDay(fireAt, lastFireAt)) break;
+      if (lastFireAt != null && !fireAt.isAfter(lastFireAt)) break;
 
       final now = DateTime.now();
       if (!fireAt.isAfter(now.subtract(const Duration(seconds: 30)))) {
@@ -298,6 +339,7 @@ class NotificationService {
         fireAt: fireAt,
       );
       scheduled++;
+      lastFireAt = fireAt;
       cursor = fireAt.add(const Duration(minutes: 1));
     }
   }
@@ -354,61 +396,61 @@ class NotificationService {
         : 'Due $dayLabel at ${task.startTime!.formatTwelveHour()}';
   }
 
-  /// Cancels all scheduled task reminders. The foreground-service notification
-  /// is restored afterwards if it was running.
-  Future<void> cancelAll() async {
-    if (!_supported) return;
-    final restoreForeground = _foregroundRunning;
-    try {
-      await _plugin.cancelAll();
-    } catch (_) {}
-    if (restoreForeground) {
-      _foregroundRunning = false;
-    }
+  /// Cancels every pending notification, including the foreground summary.
+  /// Used by reseed / reset-all flows.
+  Future<void> cancelAll() {
+    return _enqueue(() async {
+      if (!_supported) return;
+      try {
+        await _plugin.cancelAll();
+      } catch (_) {}
+    });
   }
 
   /// Starts or updates the Android foreground service. Only call when reminders
   /// are enabled — use [stopTodayForeground] when they are off.
-  Future<void> updateTodayForeground(List<Task> tasks, [DateTime? day]) async {
-    if (!_supported || !_isAndroidNative) return;
+  Future<void> updateTodayForeground(List<Task> tasks, [DateTime? day]) {
+    return _enqueue(() async {
+      if (!_supported || !_isAndroidNative) return;
 
-    final summary = foregroundSummaryFor(tasks, day ?? DateTime.now());
+      final summary = foregroundSummaryFor(tasks, day ?? DateTime.now());
 
-    const details = AndroidNotificationDetails(
-      _foregroundChannelId,
-      _foregroundChannelName,
-      channelDescription: _foregroundChannelDescription,
-      importance: Importance.low,
-      priority: Priority.low,
-      ongoing: true,
-      autoCancel: false,
-      onlyAlertOnce: true,
-      showWhen: false,
-    );
-
-    try {
-      await _android?.startForegroundService(
-        _foregroundNotificationId,
-        summary.title,
-        summary.body,
-        notificationDetails: details,
-        foregroundServiceTypes: {
-          AndroidServiceForegroundType.foregroundServiceTypeSpecialUse,
-        },
+      const details = AndroidNotificationDetails(
+        _foregroundChannelId,
+        _foregroundChannelName,
+        channelDescription: _foregroundChannelDescription,
+        importance: Importance.low,
+        priority: Priority.low,
+        ongoing: true,
+        autoCancel: false,
+        onlyAlertOnce: true,
+        showWhen: false,
       );
-      _foregroundRunning = true;
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('NotificationService.updateTodayForeground failed: $e');
+
+      try {
+        await _android?.startForegroundService(
+          _foregroundNotificationId,
+          summary.title,
+          summary.body,
+          notificationDetails: details,
+          foregroundServiceTypes: {
+            AndroidServiceForegroundType.foregroundServiceTypeSpecialUse,
+          },
+        );
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('NotificationService.updateTodayForeground failed: $e');
+        }
       }
-    }
+    });
   }
 
-  Future<void> stopTodayForeground() async {
-    if (!_supported || !_isAndroidNative) return;
-    try {
-      await _android?.stopForegroundService();
-    } catch (_) {}
-    _foregroundRunning = false;
+  Future<void> stopTodayForeground() {
+    return _enqueue(() async {
+      if (!_supported || !_isAndroidNative) return;
+      try {
+        await _android?.stopForegroundService();
+      } catch (_) {}
+    });
   }
 }
