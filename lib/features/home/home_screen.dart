@@ -183,7 +183,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       return;
     }
 
-    final showCheckbox = !task.isEvent || !upcoming;
+    final showCheckbox = !task.isEvent;
     if (!showCheckbox) {
       await _openOverview(task, today);
       return;
@@ -1172,7 +1172,7 @@ class _HomeTaskTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final showCheckbox = !task.isEvent || !upcoming;
+    final showCheckbox = !task.isEvent;
     final m = density.paddingMultiplier;
     final hPad = 14 * m;
     final vPad = 12 * m;

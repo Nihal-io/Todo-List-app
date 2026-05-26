@@ -47,6 +47,8 @@ And because everything is stored locally, your task history is yours — period.
 ### Analytics (Settings → Insights)
 - 21-day overall completion bar chart, **subtask-weighted**: if today's recurring task with two subtasks is half-done, today's bar reads 50% for that task — not 0%
 - Per-day percentage reflects the average across every recurring task that applies on that day, so two tasks where you completed one is a 50% bar, not a missed day
+- **Completion rate** card: total recurring completion across the same window (every scheduled occurrence counts; missed days pull the rate down)
+- **Overdue share** on that card: percentage of one-off tasks past deadline that are still incomplete (recurring tasks excluded — they track misses, not overdue)
 - Per-task streak rows: current streak vs. best streak, repeat pattern, fire/trophy chips
 - "Stay tuned" roadmap card for upcoming insights
 
@@ -128,17 +130,6 @@ If `key.properties` is absent the build still produces an unsigned bundle/APK.
 - **table_calendar** for the calendar widget
 
 No backend, no third-party services.
-
-## Contributing
-
-Issues and PRs welcome. Before sending a PR:
-
-```bash
-flutter analyze       # must report no issues
-flutter test          # must pass
-```
-
-Keep commits scoped and message them in the imperative.
 
 ## License
 

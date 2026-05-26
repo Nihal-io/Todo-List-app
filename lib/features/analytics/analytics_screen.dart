@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../analytics/recurring_completion.dart';
 import '../../models/task.dart';
 import '../../providers/clock_provider.dart';
 import '../../providers/settings_provider.dart';
@@ -10,7 +11,7 @@ import '../../shared/date_utils.dart';
 import '../../theme/app_theme.dart';
 
 /// How many days of history to render in the overall chart.
-const int _windowDays = 21;
+const int _windowDays = kRecurringAnalyticsWindowDays;
 
 /// One day in the overall chart. `pct` is null when no recurring task was
 /// scheduled that day (rendered as a faint placeholder so the gap reads as
@@ -34,7 +35,11 @@ class AnalyticsScreen extends ConsumerWidget {
       appBar: AppBar(title: const Text('Analytics')),
       body: recurring.isEmpty
           ? const _EmptyState()
-          : _Body(recurring: recurring, today: today),
+          : _Body(
+              recurring: recurring,
+              allTasks: tasks,
+              today: today,
+            ),
     );
   }
 }
@@ -44,14 +49,21 @@ class AnalyticsScreen extends ConsumerWidget {
 // ---------------------------------------------------------------------------
 
 class _Body extends ConsumerWidget {
-  const _Body({required this.recurring, required this.today});
+  const _Body({
+    required this.recurring,
+    required this.allTasks,
+    required this.today,
+  });
 
   final List<Task> recurring;
+  final List<Task> allTasks;
   final DateTime today;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final overallSeries = _overallSeries(recurring, today);
+    final totalRate = totalRecurringCompletionRate(recurring, today);
+    final overdueRate = oneOffOverdueRate(allTasks, today);
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
@@ -59,6 +71,11 @@ class _Body extends ConsumerWidget {
         _Hero(),
         const SizedBox(height: 16),
         _OverallCard(series: overallSeries),
+        const SizedBox(height: 12),
+        _CompletionRateCard(
+          totalRate: totalRate,
+          overdueRate: overdueRate,
+        ),
         const SizedBox(height: 18),
         Padding(
           padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
@@ -352,6 +369,139 @@ class _AxisLabels extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
+// Completion rate — aggregate + one-off overdue share
+// ---------------------------------------------------------------------------
+
+class _CompletionRateCard extends StatelessWidget {
+  const _CompletionRateCard({
+    required this.totalRate,
+    required this.overdueRate,
+  });
+
+  final double? totalRate;
+  final double? overdueRate;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final error = Theme.of(context).colorScheme.error;
+
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'COMPLETION RATE',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.7,
+              color: AppSemanticColors.textMuted(context),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                totalRate == null ? '—' : '${(totalRate! * 100).round()}%',
+                style: TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.w800,
+                  color: primary,
+                  height: 1.0,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  totalRate == null
+                      ? 'no scheduled days in window'
+                      : 'total · last $_windowDays days',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppSemanticColors.textMuted(context),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            totalRate == null
+                ? 'Add recurring weekdays in this period to see your rate.'
+                : 'Every scheduled occurrence counts. Missed days lower this '
+                    'number; today can include partial credit from subtasks.',
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.35,
+              color: AppSemanticColors.textMuted(context),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Divider(height: 1, color: AppSemanticColors.subtleBorder(context)),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.schedule_rounded,
+                size: 18,
+                color: overdueRate != null && overdueRate! > 0
+                    ? error
+                    : AppSemanticColors.textFaint(context),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Tasks that went overdue',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppSemanticColors.textStrong(context),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      overdueRate == null
+                          ? 'No one-off tasks have reached their deadline yet.'
+                          : '${(overdueRate! * 100).round()}% of one-off tasks '
+                              'past deadline are still incomplete. Recurring '
+                              'tasks are excluded — they use missed days, not '
+                              'overdue.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.35,
+                        color: AppSemanticColors.textMuted(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (overdueRate != null) ...[
+                const SizedBox(width: 8),
+                Text(
+                  '${(overdueRate! * 100).round()}%',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: overdueRate! > 0 ? error : primary,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Per-task streak row (no graph — task completion is binary)
 // ---------------------------------------------------------------------------
 
@@ -591,24 +741,6 @@ class _EmptyState extends StatelessWidget {
 // Series computation
 // ---------------------------------------------------------------------------
 
-/// Per-day completion for one recurring task on one calendar day.
-///
-/// Returns:
-///   - `1.0` if the day is marked done in `completedDates`.
-///   - For today only: the subtask completion fraction (so a partially-checked
-///     subtask list reads as e.g. 50% on the overall bar). Subtask state isn't
-///     tracked per-day, so historical days can't show partial credit.
-///   - `0.0` otherwise (past missed days, future days).
-double _dayCompletion(Task task, DateTime day, DateTime today) {
-  final isDone = task.completedDates.any((c) => sameDay(c, day));
-  if (isDone) return 1.0;
-  if (!task.hasSubtasks) return 0.0;
-  if (sameDay(day, today)) {
-    return task.completedSubtaskCount / task.subtasks.length;
-  }
-  return 0.0;
-}
-
 List<_OverallDayPoint> _overallSeries(List<Task> recurring, DateTime today) {
   final todayD = dateOnly(today);
   final out = <_OverallDayPoint>[];
@@ -618,7 +750,7 @@ List<_OverallDayPoint> _overallSeries(List<Task> recurring, DateTime today) {
     for (final t in recurring) {
       if (d.isBefore(dateOnly(t.startDate))) continue;
       if (!t.recurrence!.appliesOn(d)) continue;
-      contributions.add(_dayCompletion(t, d, todayD));
+      contributions.add(recurringDayCompletionCredit(t, d, todayD));
     }
     out.add(_OverallDayPoint(
       date: d,
